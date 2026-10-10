@@ -1,0 +1,126 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Copyright (C) 2026 perz3us */
+#ifndef SI3226X_MAP_H
+#define SI3226X_MAP_H
+
+#define SI3226X_ID		0xc3
+#define SI_DEVICE_KEY		0x65
+
+/* registers */
+#define SI_ID			0
+#define SI_MSTRSTAT		3
+#define SI_RAMSTAT		4
+#define SI_RAM_ADDR_HI		5
+#define SI_IRQ0			17
+#define SI_IRQ1			18
+#define SI_IRQ2			19
+#define SI_IRQ3			20
+#define SI_IRQ4			21
+#define SI_IRQEN1		22
+#define SI_IRQEN2		23
+#define SI_IRQEN3		24
+#define SI_IRQEN4		25
+#define SI_CALR0		26
+#define SI_CALR1		27
+#define SI_CALR2		28
+#define SI_CALR3		29
+#define SI_LINEFEED		30
+#define SI_LCRRTP		34
+#define SI_OFFLOAD		35
+#define SI_ZCAL_EN		46
+#define SI_ENHANCE		47
+#define SI_GPIO_CFG1		68
+#define SI_AUTO			80
+#define SI_JMPEN		81
+#define SI_JMP0LO		82
+#define SI_PDN			98
+#define SI_USERMODE		126
+
+/* RAM */
+#define RAM_MADC_VTIPC		1
+#define RAM_MADC_VRINGC		2
+#define RAM_MADC_VBAT		3
+#define RAM_MADC_ILOOP		10
+#define RAM_PATCHID		448
+#define RAM_ILOOPLPF		513
+#define RAM_ILONGLPF		514
+#define RAM_VDIFFLPF		516
+#define RAM_VCMLPF		517
+#define RAM_TXACHPF_A1_1	533
+#define RAM_ROW0_C2		626
+#define RAM_ROW1_C2		627
+#define RAM_CM_SPEEDUP_TIMER	708
+#define RAM_VCM_TH		709
+#define RAM_VCM_HYST		750
+#define RAM_P_TH_HVIC		756
+#define RAM_COEF_P_HVIC		759
+#define RAM_BAT_HYST		764
+#define RAM_VBATH_EXPECT	767
+#define RAM_VBATR_EXPECT	768
+#define RAM_IRING_LIM		860
+#define RAM_PWRSAVE_TIMER	915
+#define RAM_OFFHOOK_THRESH	916
+#define RAM_XTALK_TIMER		918
+#define RAM_VBAT_TRACK_MIN	919
+#define RAM_VBAT_TRACK_MIN_RNG	920
+#define RAM_SCALE_KAUDIO	967
+#define RAM_THERM_DBI		970
+#define RAM_LPR_SCALE		971
+#define RAM_LPR_CM_OS		972
+#define RAM_VOV_DCDC_SLOPE	973
+#define RAM_VOV_DCDC_OS		974
+#define RAM_VOV_RING_BAT_MAX	975
+#define RAM_DCDC_VERR		1004
+#define RAM_DCDC_VERR_HYST	1005
+#define RAM_DCDC_OITHRESH_LO	1006
+#define RAM_DCDC_OITHRESH_HI	1007
+#define RAM_LKG_OFHK_OFFSET	1017
+#define RAM_LKG_LB_OFFSET	1018
+#define RAM_VBATH_DELTA		1020
+#define RAM_UVTHRESH_MAX	1021
+#define RAM_UVTHRESH_SCALE	1022
+#define RAM_UVTHRESH_BIAS	1023
+#define RAM_PRAM_ADDR		1358
+#define RAM_PRAM_DATA		1359
+#define RAM_PD_DCDC		1538
+#define RAM_PD_UVLO		1540
+#define RAM_PD_OVLO		1541
+#define RAM_PD_OCLO		1542
+#define RAM_DCDC_UVHYST		1545
+#define RAM_DCDC_UVTHRESH	1546
+#define RAM_DCDC_OVTHRESH	1547
+#define RAM_DCDC_OITHRESH	1548
+#define RAM_DCDC_STATUS		1551
+#define RAM_DCDC_SWDRV_POL	1553
+#define RAM_DCDC_UVPOL		1554
+#define RAM_DCDC_CPUMP		1555
+#define RAM_DCDC_VREF_CTRL	1558
+#define RAM_DCDC_RNGTYPE	1560
+#define RAM_DCDC_OIMASK		1565
+#define RAM_PWRSAVE_CTRL_LO	1575
+#define RAM_DCDC_ANA_GAIN	1585
+#define RAM_DCDC_ANA_TOFF	1586
+#define RAM_DCDC_ANA_TONMIN	1587
+#define RAM_DCDC_ANA_TONMAX	1588
+#define RAM_DCDC_ANA_DSHIFT	1589
+#define RAM_DCDC_ANA_LPOLY	1590
+#define RAM_DCDC_CPUMP_LP_MASK	1616
+#define RAM_JMP8		1597
+#define RAM_DCDC_DCFF_ENABLE	1635
+#define RAM_DCDC_UV_DEBOUNCE	1641
+#define RAM_DCDC_OV_DEBOUNCE	1643
+
+/* PD_DCDC converter states */
+#define DCDC_CLEAR_LOCKOUT	0x700000
+#define DCDC_START_DIGITAL	0x600000
+#define DCDC_RUN_ANALOG		0x400000
+#define DCDC_SHUTDOWN		0x300000
+
+#define SI_JMP_LOW		8
+#define SI_IRING_LIM_MAX	0xA00000
+
+#define SI_COMP_5V		0x51EB82
+#define SI_MADC_MV_DIV		1074
+#define SI_MADC_UA_DIV		597
+
+#endif

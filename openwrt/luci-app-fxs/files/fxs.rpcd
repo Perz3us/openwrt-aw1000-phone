@@ -1,0 +1,95 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 perz3us
+
+. /usr/share/libubox/jshn.sh
+
+STATE=/var/run/fxsd.state
+CALLS=/etc/fxs/calls.log
+GUARD=/etc/fxs/.starting
+
+status() {
+	local state=stopped peer= offhook=0 k v patch
+
+	if [ -f "$STATE" ]; then
+		while IFS='=' read -r k v; do
+			case "$k" in
+			state) state="$v" ;;
+			peer) peer="$v" ;;
+			offhook) offhook="$v" ;;
+			esac
+		done < "$STATE"
+	fi
+	patch=$(uci -q get fxs.main.patch)
+	json_init
+	json_add_string state "$state"
+	json_add_string peer "$peer"
+	json_add_boolean offhook "$offhook"
+	json_add_boolean running "$(pidof fxsd >/dev/null && echo 1 || echo 0)"
+	json_add_boolean module "$(grep -q '^aw1000_fxs ' /proc/modules && echo 1 || echo 0)"
+	json_add_boolean guard "$([ -f "$GUARD" ] && echo 1 || echo 0)"
+	json_add_boolean patch "$([ -s "${patch:-/etc/fxs/si3226x_patch.bin}" ] && echo 1 || echo 0)"
+	json_add_boolean enabled "$(uci -q get fxs.main.enabled || echo 1)"
+	json_dump
+}
+
+set_enabled() {
+	local input enabled
+
+	read -r input
+	json_load "$input"
+	json_get_var enabled enabled
+	case "$enabled" in
+	1|true) enabled=1 ;;
+	*) enabled=0 ;;
+	esac
+	uci set fxs.main.enabled="$enabled"
+	uci commit fxs
+	if [ "$enabled" = 1 ]; then
+		/etc/init.d/fxsd enable
+		/etc/init.d/fxsd restart
+	else
+		/etc/init.d/fxsd stop
+	fi
+	json_init
+	json_add_boolean enabled "$enabled"
+	json_dump
+}
+
+calls() {
+	local t ev num
+
+	json_init
+	json_add_array calls
+	if [ -f "$CALLS" ]; then
+		tail -n 50 "$CALLS" > /tmp/fxs-calls.tail
+		while read -r t ev num; do
+			json_add_object
+			json_add_int time "$t"
+			json_add_string event "$ev"
+			json_add_string number "$num"
+			json_close_object
+		done < /tmp/fxs-calls.tail
+		rm -f /tmp/fxs-calls.tail
+	fi
+	json_close_array
+	json_dump
+}
+
+case "$1" in
+list)
+	echo '{ "status": {}, "calls": {}, "clear_guard": {}, "set_enabled": { "enabled": true } }'
+	;;
+call)
+	case "$2" in
+	status) status ;;
+	calls) calls ;;
+	set_enabled) set_enabled ;;
+	clear_guard)
+		/etc/init.d/fxsd clear_guard
+		/etc/init.d/fxsd restart
+		echo '{ "result": true }'
+		;;
+	esac
+	;;
+esac

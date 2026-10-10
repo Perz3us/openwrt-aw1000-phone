@@ -1,0 +1,17 @@
+{
+	"luci-app-fxs": {
+		"description": "Grant access to the RJ11 phone port",
+		"read": {
+			"ubus": {
+				"fxs": [ "status", "calls" ]
+			},
+			"uci": [ "fxs" ]
+		},
+		"write": {
+			"ubus": {
+				"fxs": [ "clear_guard", "set_enabled" ]
+			},
+			"uci": [ "fxs" ]
+		}
+	}
+}

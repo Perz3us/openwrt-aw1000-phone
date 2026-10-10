@@ -1,0 +1,58 @@
+#!/bin/sh /etc/rc.common
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 perz3us
+
+START=99
+STOP=10
+USE_PROCD=1
+
+GUARD=/etc/fxs/.starting
+EXTRA_COMMANDS="clear_guard"
+EXTRA_HELP="	clear_guard	Allow fxsd to start again after a failed start"
+
+clear_guard() {
+	rm -f "$GUARD"
+	sync
+}
+
+start_service() {
+	local enabled channel tx_gain rx_gain at_port volume modem_rx_gain patch
+
+	config_load fxs
+	config_get_bool enabled main enabled 1
+	[ "$enabled" = 1 ] || return 0
+	config_get channel main channel 1
+	config_get tx_gain main tx_gain -6
+	config_get rx_gain main rx_gain 0
+	config_get at_port main at_port /dev/ttyUSB2
+	config_get volume main volume 5
+	config_get modem_rx_gain main modem_rx_gain 8192
+	config_get patch main patch /etc/fxs/si3226x_patch.bin
+
+	if [ -f "$GUARD" ]; then
+		logger -t fxsd "previous start did not finish (router restarted), not starting; run '/etc/init.d/fxsd clear_guard' to retry"
+		return 0
+	fi
+	if [ ! -s "$patch" ]; then
+		logger -t fxsd "SLIC patch file $patch missing, not starting"
+		return 0
+	fi
+
+	mkdir -p /etc/fxs
+	touch "$GUARD"
+	sync
+	grep -q '^aw1000_fxs ' /proc/modules || insmod aw1000-fxs || {
+		logger -t fxsd "kernel module failed to load"
+		return 0
+	}
+
+	procd_open_instance
+	procd_set_param command /usr/sbin/fxsd -p "$patch" -c "$channel" -g "$tx_gain,$rx_gain" \
+		-a "$at_port" -l "$volume" -r "$modem_rx_gain"
+	procd_set_param respawn 3600 10 5
+	procd_close_instance
+}
+
+service_triggers() {
+	procd_add_reload_trigger fxs
+}

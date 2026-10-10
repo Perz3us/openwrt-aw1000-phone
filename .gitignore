@@ -1,0 +1,15 @@
+*.o
+*.ko
+*.mod
+*.mod.c
+*.cmd
+.*.cmd
+Module.symvers
+modules.order
+.module-common.o
+*.bin
+/research/
+/scripts/noobwrt_ref/
+/tools/build/
+/fxsd/build/
+/dist/
