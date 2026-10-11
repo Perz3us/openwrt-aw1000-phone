@@ -144,7 +144,4 @@ If you try it on your AW1000, let me know how it went in an issue. Pull requests
 
 ## License
 
-Copyright (C) 2026 perz3us. Released under GPL-2.0, see `LICENSE`.
-
-If you use this in your own firmware or project, keep the copyright notices and link back to
-this repo.
+Copyright (C) 2026 perz3us. Licensed under GPL-2.0, see `LICENSE`.
