@@ -15,8 +15,23 @@ clear_guard() {
 	sync
 }
 
+add_speed() {
+	local code number
+
+	config_get code "$1" code
+	config_get number "$1" number
+	[ -n "$code" ] && [ -n "$number" ] && echo "$code $number" >> /var/run/fxsd.speed
+}
+
+add_block() {
+	local number
+
+	config_get number "$1" number
+	[ -n "$number" ] && echo "$number" >> /var/run/fxsd.block
+}
+
 start_service() {
-	local enabled channel tx_gain rx_gain at_port volume modem_rx_gain patch
+	local enabled channel tx_gain rx_gain at_port volume modem_rx_gain patch led ringback callerid block_private
 
 	config_load fxs
 	config_get_bool enabled main enabled 1
@@ -28,8 +43,11 @@ start_service() {
 	config_get volume main volume 5
 	config_get modem_rx_gain main modem_rx_gain 8192
 	config_get patch main patch /etc/fxs/si3226x_patch.bin
+	config_get led main led green:phone
+	config_get_bool ringback main ringback 1
+	config_get callerid main callerid bellcore
 
-	if [ -f "$GUARD" ]; then
+	if [ -f "$GUARD" ] && [ "$(cut -d. -f1 /proc/uptime)" -lt 300 ]; then
 		logger -t fxsd "previous start did not finish (router restarted), not starting; run '/etc/init.d/fxsd clear_guard' to retry"
 		return 0
 	fi
@@ -37,6 +55,13 @@ start_service() {
 		logger -t fxsd "SLIC patch file $patch missing, not starting"
 		return 0
 	fi
+
+	: > /var/run/fxsd.speed
+	: > /var/run/fxsd.block
+	config_foreach add_speed speed
+	config_foreach add_block block
+	config_get_bool block_private main block_private 0
+	[ "$block_private" = 1 ] && echo private >> /var/run/fxsd.block
 
 	mkdir -p /etc/fxs
 	touch "$GUARD"
@@ -48,11 +73,22 @@ start_service() {
 
 	procd_open_instance
 	procd_set_param command /usr/sbin/fxsd -p "$patch" -c "$channel" -g "$tx_gain,$rx_gain" \
-		-a "$at_port" -l "$volume" -r "$modem_rx_gain"
+		-a "$at_port" -l "$volume" -r "$modem_rx_gain" -e "$led" -b "$ringback" -i "$callerid"
+	procd_set_param file /var/run/fxsd.speed /var/run/fxsd.block
 	procd_set_param respawn 3600 10 5
 	procd_close_instance
 }
 
 service_triggers() {
 	procd_add_reload_trigger fxs
+}
+
+service_stopped() {
+	local led
+
+	rm -f "$GUARD"
+	config_load fxs
+	config_get led main led green:phone
+	[ -n "$led" ] && [ -w "/sys/class/leds/$led/brightness" ] && echo 0 > "/sys/class/leds/$led/brightness"
+	return 0
 }

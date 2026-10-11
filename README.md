@@ -11,7 +11,7 @@ There are three packages:
 
 - `kmod-aw1000-fxs` kernel driver for the SLIC chip and the PCM audio bus
 - `fxsd` daemon that handles the line (ringing, dial tone, digits) and talks to the modem
-- `luci-app-fxs` LuCI page with the line status, an on/off switch, settings and a call log
+- `luci-app-fxs` LuCI pages for status, settings, speed dial and blocked numbers
 
 ## What works
 
@@ -20,8 +20,19 @@ talk. To call out, pick up, wait for the dial tone and dial. It calls when you p
 after you stop dialing for 4 seconds. If the other person hangs up you get a busy tone. It
 starts by itself after a reboot.
 
-Not done yet: caller ID, ringback tone, call waiting / hook flash, pulse dialing and tones for
-other countries (dial and busy tone are 425 Hz for now).
+Other things that work:
+
+- Caller ID on phones with a display (FSK Bellcore, FSK ETSI or DTMF)
+- Ringing tone in the handset while the other side rings
+- Hold: press FLASH during a call, press it again to come back
+- Speed dial: save a number under a code and dial `*1`, `*2` and so on
+- Blocked numbers, including hidden numbers if you want
+- The phone LED on the router is on while the port is on
+- Line test in LuCI with line voltage, loop current and a button to ring the phone
+
+Call waiting is in the code but did not work on my SIM, the network answers busy for the
+second call. Pulse dialing and tones for other countries are not done yet (dial and busy
+tone are 425 Hz).
 
 ## What you need
 
@@ -72,11 +83,13 @@ python3 tools/mkpatch.py si3226x_patch_C_FB_2017MAY26.c si3226x_patch.bin
 
 ## Settings
 
-All settings are in `/etc/config/fxs` and on the LuCI page.
+Everything can be set in LuCI under Services > Phone (RJ11). It has four tabs: Status,
+Settings, Speed dial and Blocked numbers. The same settings are in `/etc/config/fxs`.
 
 | Option | Default | |
 |---|---|---|
 | `enabled` | `1` | turn the port on or off |
+| `own_number` | | your number, shown on the Status page |
 | `tx_gain` | `-6` | your voice level to the other side (dB) |
 | `rx_gain` | `0` | the other side's level to your phone (dB) |
 | `volume` | `5` | modem speaker volume (`AT+CLVL`) |
@@ -84,11 +97,19 @@ All settings are in `/etc/config/fxs` and on the LuCI page.
 | `channel` | `1` | SLIC channel, leave it at 1 |
 | `at_port` | `/dev/ttyUSB2` | modem AT port |
 | `patch` | `/etc/fxs/si3226x_patch.bin` | patch file |
+| `ringback` | `1` | ringing tone while the other side rings |
+| `callerid` | `bellcore` | caller ID format: bellcore, etsi, dtmf or off |
+| `led` | `green:phone` | LED that is on while the port is on, empty to leave it alone |
+| `block_private` | `0` | reject calls without a number |
+
+Speed dial entries are `config speed` sections with `code` and `number`, blocked numbers are
+`config block` sections with `number`. Numbers are matched on the last 9 digits, so
+`0771234567` also blocks `+94771234567`.
 
 Logs: `logread -e fxsd`. Call log: `/etc/fxs/calls.log`.
 
-If the router reboots while fxsd is starting up, it won't start again on the next boot, just
-in case it was the cause. Run `/etc/init.d/fxsd clear_guard` or press the button in LuCI.
+If the router reboots while fxsd is starting up, it won't start again on that boot, just in
+case it was the cause. Run `/etc/init.d/fxsd clear_guard` or press the button in LuCI.
 
 ## Building
 
@@ -123,4 +144,7 @@ If you try it on your AW1000, let me know how it went in an issue. Pull requests
 
 ## License
 
-GPL-2.0
+Copyright (C) 2026 perz3us. Released under GPL-2.0, see `LICENSE`.
+
+If you use this in your own firmware or project, keep the copyright notices and link back to
+this repo.

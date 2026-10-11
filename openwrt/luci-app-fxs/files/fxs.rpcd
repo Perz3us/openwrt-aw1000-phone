@@ -9,7 +9,7 @@ CALLS=/etc/fxs/calls.log
 GUARD=/etc/fxs/.starting
 
 status() {
-	local state=stopped peer= offhook=0 k v patch
+	local state=stopped peer= offhook=0 vbat= vline= iloop= own= testring=0 k v patch
 
 	if [ -f "$STATE" ]; then
 		while IFS='=' read -r k v; do
@@ -17,14 +17,25 @@ status() {
 			state) state="$v" ;;
 			peer) peer="$v" ;;
 			offhook) offhook="$v" ;;
+			vbat) vbat="$v" ;;
+			vline) vline="$v" ;;
+			iloop) iloop="$v" ;;
+			own) own="$v" ;;
+			test) testring="$v" ;;
 			esac
 		done < "$STATE"
 	fi
 	patch=$(uci -q get fxs.main.patch)
+	own=$(uci -q get fxs.main.own_number || echo "$own")
 	json_init
 	json_add_string state "$state"
 	json_add_string peer "$peer"
+	json_add_string own "$own"
 	json_add_boolean offhook "$offhook"
+	json_add_boolean testring "$testring"
+	[ -n "$vbat" ] && json_add_int vbat "$vbat"
+	[ -n "$vline" ] && json_add_int vline "$vline"
+	[ -n "$iloop" ] && json_add_int iloop "$iloop"
 	json_add_boolean running "$(pidof fxsd >/dev/null && echo 1 || echo 0)"
 	json_add_boolean module "$(grep -q '^aw1000_fxs ' /proc/modules && echo 1 || echo 0)"
 	json_add_boolean guard "$([ -f "$GUARD" ] && echo 1 || echo 0)"
@@ -78,13 +89,20 @@ calls() {
 
 case "$1" in
 list)
-	echo '{ "status": {}, "calls": {}, "clear_guard": {}, "set_enabled": { "enabled": true } }'
+	echo '{ "status": {}, "calls": {}, "clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {} }'
 	;;
 call)
 	case "$2" in
 	status) status ;;
 	calls) calls ;;
 	set_enabled) set_enabled ;;
+	ring_test)
+		if kill -USR1 $(pidof fxsd) 2>/dev/null; then
+			echo '{ "result": true }'
+		else
+			echo '{ "result": false }'
+		fi
+		;;
 	clear_guard)
 		/etc/init.d/fxsd clear_guard
 		/etc/init.d/fxsd restart

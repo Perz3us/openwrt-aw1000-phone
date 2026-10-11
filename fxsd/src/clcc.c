@@ -27,11 +27,13 @@ static void number(const char *p, char *out)
 	out[n] = 0;
 }
 
-int clcc_parse_voice(const char *resp, struct clcc_call *call)
+int clcc_parse_all(const char *resp, struct clcc_call *calls, int max)
 {
 	const char *p = resp;
+	int n = 0;
 
-	while ((p = strstr(p, "+CLCC:"))) {
+	while (n < max && (p = strstr(p, "+CLCC:"))) {
+		struct clcc_call *call = &calls[n];
 		long v[5];
 		const char *q = p + 6;
 		int i;
@@ -47,7 +49,12 @@ int clcc_parse_voice(const char *resp, struct clcc_call *call)
 		call->number[0] = 0;
 		if (q[-1] == ',')
 			number(q, call->number);
-		return 1;
+		n++;
 	}
-	return 0;
+	return n;
+}
+
+int clcc_parse_voice(const char *resp, struct clcc_call *call)
+{
+	return clcc_parse_all(resp, call, 1);
 }

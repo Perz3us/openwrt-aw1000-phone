@@ -21,6 +21,9 @@ struct clcc_call {
 	char number[CLCC_NUM_MAX];
 };
 
+#define CLCC_MAX 4
+
 int clcc_parse_voice(const char *resp, struct clcc_call *call);
+int clcc_parse_all(const char *resp, struct clcc_call *calls, int max);
 
 #endif

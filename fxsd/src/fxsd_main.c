@@ -10,6 +10,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "bringup.h"
+#include "cid.h"
 #include "clcc.h"
 #include "fxsdev.h"
 #include "line.h"
@@ -25,21 +26,35 @@
 #define CALL_LOG_MAX	200
 #define GUARD_FILE	"/etc/fxs/.starting"
 #define GUARD_CLEAR_MS	60000
+#define LED_DIR		"/sys/class/leds/"
+#define SPEED_FILE	"/var/run/fxsd.speed"
+#define BLOCK_FILE	"/var/run/fxsd.block"
+#define LIST_MAX	32
 
 struct fxsd {
 	struct slic s;
 	struct line line;
 	uint8_t ch;
 	int ringing, audio, verbose;
-	unsigned long t_ring_arm;
+	int cid_mode, cid_pending, test_ring;
+	int32_t vbat_mv, vline_mv, iloop_ua;
+	unsigned long t_ring_arm, t_gap, t_meas, t_test;
 };
 
-static volatile sig_atomic_t stop;
+static volatile sig_atomic_t stop, ring_test;
+static char own_number[CLCC_NUM_MAX];
+static const char *led_name = "green:phone";
 
 static void on_sig(int sig)
 {
 	(void)sig;
 	stop = 1;
+}
+
+static void on_usr1(int sig)
+{
+	(void)sig;
+	ring_test = 1;
 }
 
 static unsigned long now_ms(void)
@@ -59,6 +74,20 @@ static void msg(int prio, const char *fmt, ...)
 	va_end(ap);
 }
 
+static void led(int on)
+{
+	char path[128];
+	FILE *f;
+
+	if (!*led_name)
+		return;
+	snprintf(path, sizeof(path), LED_DIR "%s/brightness", led_name);
+	if ((f = fopen(path, "w"))) {
+		fputs(on ? "1" : "0", f);
+		fclose(f);
+	}
+}
+
 static void at(const char *cmd)
 {
 	char r[512];
@@ -76,8 +105,10 @@ static void op_tone(void *c, enum line_tone t)
 		return;
 	}
 	si_tone_stop(&d->s, d->ch);
-	si_tone_setup(&d->s, d->ch, t == TONE_DIAL ? &aw1000_dialtone : &aw1000_busytone);
-	si_tone_start(&d->s, d->ch, t == TONE_BUSY);
+	si_tone_setup(&d->s, d->ch, t == TONE_DIAL ? &aw1000_dialtone :
+		      t == TONE_BUSY ? &aw1000_busytone :
+		      t == TONE_WAITING ? &aw1000_waitingtone : &aw1000_ringbacktone);
+	si_tone_start(&d->s, d->ch, t != TONE_DIAL);
 }
 
 static void op_ring(void *c, int on)
@@ -87,6 +118,8 @@ static void op_ring(void *c, int on)
 
 	if (on) {
 		fxsdev_ring_arm(&d->s, RING_ARM_MS);
+		d->cid_pending = d->cid_mode != CID_OFF;
+		d->t_gap = 0;
 		d->t_ring_arm = now_ms();
 		si_linefeed(&d->s, d->ch, SI_LF_RING);
 	} else {
@@ -129,6 +162,81 @@ static void op_hangup(void *c)
 	at("AT+CHUP");
 }
 
+static void op_chld(void *c, const char *arg)
+{
+	char cmd[32];
+
+	(void)c;
+	snprintf(cmd, sizeof(cmd), "AT+CHLD=%s", arg);
+	at(cmd);
+}
+
+static struct { char code[4]; char num[CLCC_NUM_MAX]; } speed[LIST_MAX];
+static char block[LIST_MAX][CLCC_NUM_MAX];
+static int nspeed, nblock;
+
+static void load_lists(void)
+{
+	char buf[96];
+	FILE *f;
+
+	if ((f = fopen(SPEED_FILE, "r"))) {
+		while (nspeed < LIST_MAX && fgets(buf, sizeof(buf), f))
+			if (sscanf(buf, "%3s %31s", speed[nspeed].code, speed[nspeed].num) == 2)
+				nspeed++;
+		fclose(f);
+	}
+	if ((f = fopen(BLOCK_FILE, "r"))) {
+		while (nblock < LIST_MAX && fgets(buf, sizeof(buf), f))
+			if (sscanf(buf, "%31s", block[nblock]) == 1)
+				nblock++;
+		fclose(f);
+	}
+}
+
+static const char *op_speed(void *c, const char *code)
+{
+	int i;
+
+	(void)c;
+	for (i = 0; i < nspeed; i++)
+		if (!strcmp(code, speed[i].code))
+			return speed[i].num;
+	return NULL;
+}
+
+static size_t digits_of(const char *s, char *out)
+{
+	size_t n = 0;
+
+	for (; *s && n + 1 < CLCC_NUM_MAX; s++)
+		if (*s >= '0' && *s <= '9')
+			out[n++] = *s;
+	out[n] = 0;
+	return n;
+}
+
+static int same_number(const char *a, const char *b)
+{
+	char x[CLCC_NUM_MAX], y[CLCC_NUM_MAX];
+	size_t nx = digits_of(a, x), ny = digits_of(b, y);
+
+	if (nx >= 9 && ny >= 9)
+		return !strcmp(x + nx - 9, y + ny - 9);
+	return nx && !strcmp(x, y);
+}
+
+static int op_blocked(void *c, const char *num)
+{
+	int i;
+
+	(void)c;
+	for (i = 0; i < nblock; i++)
+		if (!strcmp(block[i], "private") ? !*num : *num && same_number(num, block[i]))
+			return 1;
+	return 0;
+}
+
 static void trim_log(void)
 {
 	static char lines[CALL_LOG_MAX][96];
@@ -169,7 +277,9 @@ static void op_log(void *c, const char *what, const char *num)
 }
 
 static struct line_ops ops = {
-	op_tone, op_ring, op_audio, op_dial, op_answer, op_hangup, op_log, NULL,
+	.tone = op_tone, .ring = op_ring, .audio = op_audio, .dial = op_dial,
+	.answer = op_answer, .hangup = op_hangup, .chld = op_chld, .log = op_log,
+	.speed = op_speed, .blocked = op_blocked,
 };
 
 static void put_state(const char *state, const char *peer, int offhook)
@@ -185,7 +295,69 @@ static void put_state(const char *state, const char *peer, int offhook)
 
 static void write_state(struct fxsd *d)
 {
-	put_state(line_state_name(d->line.state), d->line.peer, d->line.offhook);
+	FILE *f = fopen(STATE_FILE ".tmp", "w");
+
+	if (!f)
+		return;
+	fprintf(f, "state=%s\npeer=%s\noffhook=%d\nvbat=%d\nvline=%d\niloop=%d\nown=%s\ntest=%d\n",
+		line_state_name(d->line.state), d->line.peer, d->line.offhook,
+		d->vbat_mv, d->vline_mv, d->iloop_ua, own_number, d->test_ring);
+	fclose(f);
+	rename(STATE_FILE ".tmp", STATE_FILE);
+}
+
+static void measure(struct fxsd *d)
+{
+	uint32_t vbat, vtip, vring, iloop;
+
+	if (d->s.rdram(d->s.ctx, d->ch, RAM_MADC_VBAT, &vbat) ||
+	    d->s.rdram(d->s.ctx, d->ch, RAM_MADC_VTIPC, &vtip) ||
+	    d->s.rdram(d->s.ctx, d->ch, RAM_MADC_VRINGC, &vring) ||
+	    d->s.rdram(d->s.ctx, d->ch, RAM_MADC_ILOOP, &iloop))
+		return;
+	d->vbat_mv = si_vbat_mv(vbat);
+	d->vline_mv = si_vbat_mv(vtip) - si_vbat_mv(vring);
+	d->iloop_ua = si_iloop_ua(iloop);
+}
+
+static void test_ring_tick(struct fxsd *d, unsigned long now)
+{
+	int stop_test = 0;
+
+	if (ring_test) {
+		ring_test = 0;
+		if (d->test_ring) {
+			stop_test = 1;
+		} else if (d->line.state == LS_IDLE && !d->ringing && !d->line.offhook) {
+			op_ring(d, 1);
+			d->cid_pending = 0;
+			d->test_ring = 1;
+			d->t_test = now;
+			msg(LOG_INFO, "test ring");
+			write_state(d);
+		}
+	}
+	if (d->test_ring && (stop_test || now - d->t_test >= 10000 || d->line.state != LS_IDLE)) {
+		if (d->line.state != LS_RINGING)
+			op_ring(d, 0);
+		d->test_ring = 0;
+		write_state(d);
+	}
+}
+
+static void read_own_number(void)
+{
+	char r[256];
+	const char *p;
+	size_t n = 0;
+
+	if (modem_at("AT+CNUM", r, sizeof(r)) || !(p = strstr(r, "+CNUM:")) || !(p = strchr(p, ',')))
+		return;
+	for (p++; *p == '"' || *p == ' '; p++)
+		;
+	while (n + 1 < sizeof(own_number) && ((*p >= '0' && *p <= '9') || *p == '+'))
+		own_number[n++] = *p++;
+	own_number[n] = 0;
 }
 
 static int wait_modem(void)
@@ -236,14 +408,48 @@ static void handle_irq(struct fxsd *d, unsigned long now)
 		msg(LOG_WARNING, "SLIC power alarm 0x%02x", irq[2]);
 }
 
+static void poll_cid(struct fxsd *d, unsigned long now)
+{
+	struct tm tm;
+	time_t t;
+	uint8_t lf;
+	int e;
+
+	if (!d->ringing || !d->cid_pending || d->s.rd(d->s.ctx, d->ch, SI_LINEFEED, &lf))
+		return;
+	if ((lf & 0xf0) == 0x40 || (lf & 0x0f) != SI_LF_RING) {
+		if ((lf & 0xf0) == 0x40)
+			d->cid_pending = 2;
+		d->t_gap = 0;
+		return;
+	}
+	if (d->cid_pending != 2)
+		return;
+	if (!d->t_gap) {
+		d->t_gap = now;
+		return;
+	}
+	if (now - d->t_gap < 600)
+		return;
+	d->cid_pending = 0;
+	fxsdev_ring_arm(&d->s, RING_ARM_MS);
+	d->t_ring_arm = now;
+	t = time(NULL);
+	localtime_r(&t, &tm);
+	if ((e = cid_send(&d->s, d->ch, d->cid_mode, d->line.peer, &tm)))
+		msg(LOG_WARNING, "caller ID failed: %s", strerror(-e));
+	else
+		msg(LOG_INFO, "caller ID sent in %lu ms", now_ms() - now);
+}
+
 static void poll_modem(struct fxsd *d, unsigned long now)
 {
 	char r[1024];
-	struct clcc_call c;
+	struct clcc_call c[CLCC_MAX];
 
 	if (modem_at("AT+CLCC", r, sizeof(r)) || !strstr(r, "OK"))
 		return;
-	line_modem(&d->line, clcc_parse_voice(r, &c) ? &c : NULL, now);
+	line_modem(&d->line, c, clcc_parse_all(r, c, CLCC_MAX), now);
 }
 
 static int setup(struct fxsd *d, const struct si_patch *p, int gtx, int grx)
@@ -275,22 +481,23 @@ static int setup(struct fxsd *d, const struct si_patch *p, int gtx, int grx)
 
 static int usage(void)
 {
-	fprintf(stderr, "usage: fxsd -p PATCH [-c CHANNEL] [-g TXDB,RXDB] [-a ATPORT] [-l VOLUME] [-r RXGAIN] [-f] [-v]\n");
+	fprintf(stderr, "usage: fxsd -p PATCH [-c CHANNEL] [-g TXDB,RXDB] [-a ATPORT] [-l VOLUME] [-r RXGAIN] [-e LED] [-b 0|1] [-i bellcore|etsi|dtmf|off] [-f] [-v]\n");
 	return 2;
 }
 
 int main(int argc, char **argv)
 {
 	const char *patch = NULL;
-	struct fxsd d = { .ch = 1 };
+	struct fxsd d = { .ch = 1, .cid_mode = CID_BELLCORE };
 	struct si_patch p;
 	unsigned long t_modem = 0, t_hook = 0, t_ready;
 	int guard = 1;
 	enum line_state last = LS_BUSY + 1;
 	int gtx = -6, grx = 0, fg = 0, vol = -1, rxg = -1, o, e;
+	int ringback = 1;
 	char r[512];
 
-	while ((o = getopt(argc, argv, "p:c:g:a:l:r:fv")) != -1) {
+	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:b:i:fv")) != -1) {
 		switch (o) {
 		case 'p': patch = optarg; break;
 		case 'c': d.ch = atoi(optarg) & 1; break;
@@ -298,6 +505,9 @@ int main(int argc, char **argv)
 		case 'a': modem_set_port(optarg); break;
 		case 'l': vol = atoi(optarg); break;
 		case 'r': rxg = atoi(optarg); break;
+		case 'e': led_name = optarg; break;
+		case 'b': ringback = atoi(optarg); break;
+		case 'i': d.cid_mode = cid_mode_parse(optarg); break;
 		case 'f': fg = 1; break;
 		case 'v': d.verbose = 1; break;
 		default: return usage();
@@ -312,11 +522,13 @@ int main(int argc, char **argv)
 	}
 	signal(SIGINT, on_sig);
 	signal(SIGTERM, on_sig);
+	signal(SIGUSR1, on_usr1);
 	signal(SIGPIPE, SIG_IGN);
 	if (wait_modem()) {
 		unlink(STATE_FILE);
 		return 0;
 	}
+	read_own_number();
 	if (vol >= 0 && vol <= 5) {
 		snprintf(r, sizeof(r), "AT+CLVL=%d", vol);
 		at(r);
@@ -334,14 +546,17 @@ int main(int argc, char **argv)
 		goto out;
 	}
 	si_patch_free(&p);
+	load_lists();
 	ops.ctx = &d;
 	line_init(&d.line, &ops);
+	d.line.ringback = ringback;
 	msg(LOG_INFO, "ready on channel %u", d.ch);
+	led(1);
 	t_ready = now_ms();
 
 	while (!stop) {
 		unsigned long now = now_ms();
-		int w = fxsdev_wait(&d.s, 100);
+		int w = fxsdev_wait(&d.s, d.ringing && d.cid_pending ? 20 : 100);
 
 		now = now_ms();
 		if (w > 0) {
@@ -355,6 +570,13 @@ int main(int argc, char **argv)
 		if (now - t_modem >= POLL_MODEM_MS) {
 			poll_modem(&d, now);
 			t_modem = now;
+		}
+		poll_cid(&d, now);
+		test_ring_tick(&d, now);
+		if (now - d.t_meas >= 2000) {
+			measure(&d);
+			write_state(&d);
+			d.t_meas = now;
 		}
 		if (d.ringing && now - d.t_ring_arm >= 1000) {
 			fxsdev_ring_arm(&d.s, RING_ARM_MS);
@@ -377,6 +599,7 @@ int main(int argc, char **argv)
 	if (d.line.state == LS_CALLING || d.line.state == LS_TALKING)
 		at("AT+CHUP");
 out:
+	led(0);
 	fxsdev_ring_arm(&d.s, 0);
 	fxsdev_bridge(&d.s, 0);
 	si_power_down(&d.s, d.ch);

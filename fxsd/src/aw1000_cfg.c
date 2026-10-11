@@ -127,3 +127,19 @@ const struct si_tone aw1000_busytone = {
 	},
 	.omode = 0x66,
 };
+
+const struct si_tone aw1000_ringbacktone = {
+	.osc = {
+		{ .freq = 0x079C0000, .amp = 0x000E2000, .talo = 0x40, .tahi = 0x1F, .tilo = 0x00, .tihi = 0x7D },
+		{ .freq = 0x079C0000, .amp = 0x000E2000, .talo = 0x40, .tahi = 0x1F, .tilo = 0x00, .tihi = 0x7D },
+	},
+	.omode = 0x66,
+};
+
+const struct si_tone aw1000_waitingtone = {
+	.osc = {
+		{ .freq = 0x079C0000, .amp = 0x000E2000, .talo = 0x60, .tahi = 0x09, .tilo = 0x40, .tihi = 0x9C },
+		{ .freq = 0x079C0000, .amp = 0x000E2000, .talo = 0x60, .tahi = 0x09, .tilo = 0x40, .tihi = 0x9C },
+	},
+	.omode = 0x66,
+};

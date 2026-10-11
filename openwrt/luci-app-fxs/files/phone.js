@@ -1,6 +1,5 @@
 'use strict';
 'require view';
-'require form';
 'require rpc';
 'require poll';
 'require ui';
@@ -10,6 +9,7 @@ var callStatus = rpc.declare({ object: 'fxs', method: 'status' });
 var callCalls = rpc.declare({ object: 'fxs', method: 'calls', expect: { calls: [] } });
 var callClearGuard = rpc.declare({ object: 'fxs', method: 'clear_guard' });
 var callSetEnabled = rpc.declare({ object: 'fxs', method: 'set_enabled', params: [ 'enabled' ] });
+var callRingTest = rpc.declare({ object: 'fxs', method: 'ring_test' });
 
 var stateText = {
 	idle: _('Idle (on hook)'),
@@ -32,6 +32,11 @@ var eventText = {
 	connected: _('Connected'),
 	failed: _('Failed'),
 	ended: _('Ended by remote'),
+	waiting: _('Call waiting'),
+	flash: _('Hold / swap'),
+	switched: _('Switched to'),
+	retrieved: _('Back from hold'),
+	blocked: _('Blocked'),
 	hangup: _('Hung up')
 };
 
@@ -99,11 +104,54 @@ function yesno(v) {
 	return v ? _('yes') : _('no');
 }
 
+function volts(mv) {
+	return '%.1f V'.format(Math.abs(mv) / 1000);
+}
+
+function milliamps(ua) {
+	return '%.1f mA'.format(Math.abs(ua) / 1000);
+}
+
+function lineRows(st) {
+	var v = Math.abs(st.vline || 0) / 1000, i = Math.abs(st.iloop || 0) / 1000, b = Math.abs(st.vbat || 0) / 1000;
+	var ringing = st.state === 'ringing', rows = [], line, cur, bat;
+
+	if (!st.running || st.vbat == null)
+		return [ E('tr', { 'class': 'tr placeholder' }, [
+			E('td', { 'class': 'td' }, E('em', _('Available while the phone port is on')))
+		]) ];
+
+	if (ringing) {
+		line = cur = bat = _('Ringing, measured values are not meaningful');
+	} else if (st.offhook) {
+		line = v > 3 && v < 15 ? _('OK') : _('Unusual for a lifted handset');
+		cur = i >= 15 && i <= 30 ? _('OK') : (i < 15 ? _('Low, check the cable and the phone') : _('High'));
+		bat = _('OK, it drops while the handset is lifted');
+	} else {
+		line = v >= 40 && v <= 55 ? _('OK') : (v < 30 ? _('Low, check for a short or another device on the line') : _('Unusual'));
+		cur = i < 3 ? _('OK') : _('Current flows with the handset down, check the cable');
+		bat = b >= 50 && b <= 70 ? _('OK') : _('Out of range');
+	}
+
+	rows.push([ _('Line voltage'), volts(st.vline), line ]);
+	rows.push([ _('Loop current'), milliamps(st.iloop), cur ]);
+	rows.push([ _('Battery voltage'), volts(st.vbat), bat ]);
+
+	return rows.map(function(r) {
+		return E('tr', { 'class': 'tr' }, [
+			E('td', { 'class': 'td left', 'width': '33%' }, r[0]),
+			E('td', { 'class': 'td left', 'width': '20%' }, r[1]),
+			E('td', { 'class': 'td left' }, r[2])
+		]);
+	});
+}
+
 function statusRows(st) {
 	var rows = [
 		[ _('Line'), stateText[st.state] || st.state ],
+		[ _('My number'), st.own || _('unknown, set it in Settings') ],
 		[ _('Handset'), st.offhook ? _('off hook') : _('on hook') ],
-		[ _('Number'), st.peer || '-' ],
+		[ _('Number'), [ 'ringing', 'calling', 'talking' ].indexOf(st.state) >= 0 && st.peer ? st.peer : '-' ],
 		[ _('Service running'), yesno(st.running) ],
 		[ _('Kernel module loaded'), yesno(st.module) ],
 		[ _('SLIC patch present'), yesno(st.patch) ]
@@ -135,6 +183,8 @@ function callRows(calls) {
 function phoneState(st) {
 	if (!st.running)
 		return 'stopped';
+	if (st.testring)
+		return 'ringing';
 	return st.state || 'idle';
 }
 
@@ -153,6 +203,12 @@ return view.extend({
 
 		this.toggle.textContent = st.enabled === false ? _('Phone port: OFF') : _('Phone port: ON');
 		this.toggle.className = 'btn fxs-switch ' + (st.enabled === false ? 'cbi-button-negative' : 'cbi-button-positive');
+
+		if (this.ringBtn) {
+			this.ringBtn.textContent = st.testring ? _('Stop ringing') : _('Ring the phone');
+			this.ringBtn.className = 'btn ' + (st.testring ? 'cbi-button-negative' : 'cbi-button-action');
+			this.ringBtn.disabled = !st.running || (!st.testring && (st.state !== 'idle' || st.offhook));
+		}
 		this.enabled = st.enabled !== false;
 	},
 
@@ -169,6 +225,16 @@ return view.extend({
 				})
 			}, _('Try again'))
 		]);
+	},
+
+	handleRingTest: function() {
+		return callRingTest().then(function(r) {
+			if (!r || !r.result)
+				ui.addNotification(null, E('p', _('The phone service is not running.')));
+			return new Promise(function(resolve) { window.setTimeout(resolve, 300); });
+		}).then(callStatus).then(L.bind(function(st) {
+			this.updatePhone(st || {});
+		}, this));
 	},
 
 	handleToggle: function() {
@@ -189,10 +255,10 @@ return view.extend({
 
 	render: function(data) {
 		var st = data[0] || {}, calls = data[1] || [];
-		var m, s, o;
 
 		var statusTable = E('table', { 'class': 'table' }, statusRows(st));
 		var callTable = E('table', { 'class': 'table' }, callRows(calls));
+		var lineTable = E('table', { 'class': 'table' }, lineRows(st));
 		var guard = E('div', {}, this.renderGuard(st));
 
 		this.phone = E('div', { 'class': 'fxs-phone' });
@@ -202,6 +268,7 @@ return view.extend({
 		this.phone.appendChild(this.phoneLabel);
 		this.phone.appendChild(this.phonePeer);
 		this.toggle = E('button', { 'click': ui.createHandlerFn(this, 'handleToggle') });
+		this.ringBtn = E('button', { 'click': ui.createHandlerFn(this, 'handleRingTest') });
 		this.updatePhone(st);
 
 		poll.add(L.bind(function() {
@@ -211,56 +278,39 @@ return view.extend({
 				this.updatePhone(cur);
 				dom.content(statusTable, statusRows(cur));
 				dom.content(callTable, callRows(r[1] || []));
+				dom.content(lineTable, lineRows(cur));
 				dom.content(guard, this.renderGuard(cur));
 			}, this));
 		}, this), 1);
 
-		m = new form.Map('fxs', _('Phone (RJ11)'),
-			_('Use a normal telephone on the RJ11 port to make and receive calls with the SIM.'));
-
-		s = m.section(form.NamedSection, 'main', 'fxs', _('Settings'));
-
-		o = s.option(form.ListValue, 'volume', _('Earpiece volume'),
-			_('Modem output volume (AT+CLVL).'));
-		[ '0', '1', '2', '3', '4', '5' ].forEach(function(v) { o.value(v); });
-
-		o = s.option(form.Value, 'tx_gain', _('Microphone gain (dB)'),
-			_('Level of your voice sent to the other side. Lower it if the other side hears distortion.'));
-		o.datatype = 'range(-20,6)';
-
-		o = s.option(form.Value, 'rx_gain', _('Earpiece gain (dB)'),
-			_('Extra level of the other side in the handset.'));
-		o.datatype = 'range(-20,6)';
-
-		o = s.option(form.Value, 'modem_rx_gain', _('Modem receive gain'),
-			_('AT+QRXGAIN value, 8192 is unity.'));
-		o.datatype = 'range(0,65535)';
-
-		o = s.option(form.ListValue, 'channel', _('SLIC channel'),
-			_('Only channel 1 is wired on the AW1000.'));
-		o.value('1');
-		o.value('0');
-
-		o = s.option(form.Value, 'at_port', _('Modem AT port'));
-
-		o = s.option(form.Value, 'patch', _('SLIC patch file'));
-
-		return m.render().then(L.bind(function(node) {
-			return E([], [
-				E('style', {}, css),
-				guard,
-				E('div', { 'class': 'cbi-section' }, [
-					E('div', { 'class': 'fxs-top' }, [
-						this.phone,
-						E('div', { 'style': 'flex: 1; min-width: 280px' }, [
-							E('div', { 'style': 'margin-bottom: 12px' }, this.toggle),
-							statusTable
-						])
+		return E([], [
+			E('style', {}, css),
+			E('h2', _('Phone (RJ11)')),
+			E('div', { 'class': 'cbi-map-descr' }, _('Use a normal telephone on the RJ11 port to make and receive calls with the SIM.')),
+			guard,
+			E('div', { 'class': 'cbi-section' }, [
+				E('div', { 'class': 'fxs-top' }, [
+					this.phone,
+					E('div', { 'style': 'flex: 1; min-width: 280px' }, [
+						E('div', { 'style': 'margin-bottom: 12px' }, this.toggle),
+						statusTable
 					])
-				]),
-				E('div', { 'class': 'cbi-section' }, [ E('h3', _('Recent calls')), callTable ]),
-				node
-			]);
-		}, this));
-	}
+				])
+			]),
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', _('Line test')),
+				lineTable,
+				E('div', { 'style': 'margin-top: 10px' }, this.ringBtn)
+			]),
+			E('div', { 'class': 'cbi-section' }, [ E('h3', _('Recent calls')), callTable ]),
+			E('div', { 'style': 'text-align: right; opacity: 0.6; font-size: 90%' }, [
+				E('a', { 'href': 'https://github.com/Perz3us/openwrt-aw1000-phone', 'target': '_blank', 'rel': 'noreferrer' },
+					'openwrt-aw1000-phone by perz3us')
+			])
+		]);
+	},
+
+	handleSaveApply: null,
+	handleSave: null,
+	handleReset: null
 });
