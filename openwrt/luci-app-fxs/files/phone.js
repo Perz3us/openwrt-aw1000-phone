@@ -6,7 +6,6 @@
 'require dom';
 
 var callStatus = rpc.declare({ object: 'fxs', method: 'status' });
-var callCalls = rpc.declare({ object: 'fxs', method: 'calls', expect: { calls: [] } });
 var callClearGuard = rpc.declare({ object: 'fxs', method: 'clear_guard' });
 var callSetEnabled = rpc.declare({ object: 'fxs', method: 'set_enabled', params: [ 'enabled' ] });
 var callRingTest = rpc.declare({ object: 'fxs', method: 'ring_test' });
@@ -22,22 +21,6 @@ var stateText = {
 	waiting_modem: _('Waiting for modem'),
 	modem_master: _('Modem audio not set to slave mode'),
 	stopped: _('Stopped')
-};
-
-var eventText = {
-	incoming: _('Incoming'),
-	answered: _('Answered'),
-	missed: _('Missed'),
-	dial: _('Dialed'),
-	connected: _('Connected'),
-	failed: _('Failed'),
-	ended: _('Ended by remote'),
-	waiting: _('Call waiting'),
-	flash: _('Hold / swap'),
-	switched: _('Switched to'),
-	retrieved: _('Back from hold'),
-	blocked: _('Blocked'),
-	hangup: _('Hung up')
 };
 
 var css = '\
@@ -165,21 +148,6 @@ function statusRows(st) {
 	});
 }
 
-function callRows(calls) {
-	if (!calls.length)
-		return [ E('tr', { 'class': 'tr placeholder' }, [
-			E('td', { 'class': 'td' }, E('em', _('No calls yet')))
-		]) ];
-
-	return calls.slice().reverse().map(function(c) {
-		return E('tr', { 'class': 'tr' }, [
-			E('td', { 'class': 'td left' }, new Date(c.time * 1000).toLocaleString()),
-			E('td', { 'class': 'td left' }, eventText[c.event] || c.event),
-			E('td', { 'class': 'td left' }, c.number || _('unknown'))
-		]);
-	});
-}
-
 function phoneState(st) {
 	if (!st.running)
 		return 'stopped';
@@ -190,7 +158,7 @@ function phoneState(st) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([ callStatus(), callCalls() ]);
+		return callStatus();
 	},
 
 	updatePhone: function(st) {
@@ -254,10 +222,9 @@ return view.extend({
 	},
 
 	render: function(data) {
-		var st = data[0] || {}, calls = data[1] || [];
+		var st = data || {};
 
 		var statusTable = E('table', { 'class': 'table' }, statusRows(st));
-		var callTable = E('table', { 'class': 'table' }, callRows(calls));
 		var lineTable = E('table', { 'class': 'table' }, lineRows(st));
 		var guard = E('div', {}, this.renderGuard(st));
 
@@ -272,12 +239,11 @@ return view.extend({
 		this.updatePhone(st);
 
 		poll.add(L.bind(function() {
-			return Promise.all([ callStatus(), callCalls() ]).then(L.bind(function(r) {
-				var cur = r[0] || {};
+			return callStatus().then(L.bind(function(r) {
+				var cur = r || {};
 
 				this.updatePhone(cur);
 				dom.content(statusTable, statusRows(cur));
-				dom.content(callTable, callRows(r[1] || []));
 				dom.content(lineTable, lineRows(cur));
 				dom.content(guard, this.renderGuard(cur));
 			}, this));
@@ -302,7 +268,6 @@ return view.extend({
 				lineTable,
 				E('div', { 'style': 'margin-top: 10px' }, this.ringBtn)
 			]),
-			E('div', { 'class': 'cbi-section' }, [ E('h3', _('Recent calls')), callTable ]),
 			E('div', { 'style': 'text-align: right; opacity: 0.6; font-size: 90%' }, [
 				E('a', { 'href': 'https://github.com/Perz3us/openwrt-aw1000-phone', 'target': '_blank', 'rel': 'noreferrer' },
 					'openwrt-aw1000-phone by perz3us')

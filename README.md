@@ -29,6 +29,7 @@ Other things that work:
 - Blocked numbers, including hidden numbers if you want
 - The phone LED on the router is on while the port is on
 - Line test in LuCI with line voltage, loop current and a button to ring the phone
+- Call history with search, filters, CSV export and optional auto delete
 
 Call waiting is in the code but did not work on my SIM, the network answers busy for the
 second call. Pulse dialing and tones for other countries are not done yet (dial and busy
@@ -83,8 +84,8 @@ python3 tools/mkpatch.py si3226x_patch_C_FB_2017MAY26.c si3226x_patch.bin
 
 ## Settings
 
-Everything can be set in LuCI under Services > Phone (RJ11). It has four tabs: Status,
-Settings, Speed dial and Blocked numbers. The same settings are in `/etc/config/fxs`.
+Everything can be set in LuCI under Services > Phone (RJ11). It has five tabs: Status,
+Call history, Settings, Speed dial and Blocked numbers. The same settings are in `/etc/config/fxs`.
 
 | Option | Default | |
 |---|---|---|
@@ -101,6 +102,8 @@ Settings, Speed dial and Blocked numbers. The same settings are in `/etc/config/
 | `callerid` | `bellcore` | caller ID format: bellcore, etsi, dtmf or off |
 | `led` | `green:phone` | LED that is on while the port is on, empty to leave it alone |
 | `block_private` | `0` | reject calls without a number |
+| `history_autodelete` | `0` | delete old calls from the call history |
+| `history_days` | `30` | how many days of calls to keep when that is on |
 
 Speed dial entries are `config speed` sections with `code` and `number`, blocked numbers are
 `config block` sections with `number`. Numbers are matched on the last 9 digits, so

@@ -23,10 +23,13 @@
 #define RING_ARM_MS	3000
 #define STATE_FILE	"/var/run/fxsd.state"
 #define CALL_LOG	"/etc/fxs/calls.log"
-#define CALL_LOG_MAX	200
+#define CALL_LOG_MAX	2000
+#define CLOCK_VALID	1700000000L
+#define PRUNE_MS	3600000UL
 #define GUARD_FILE	"/etc/fxs/.starting"
 #define GUARD_CLEAR_MS	60000
 #define LED_DIR		"/sys/class/leds/"
+#define LED_NIGHT	"/tmp/led-night-active"
 #define SPEED_FILE	"/var/run/fxsd.speed"
 #define BLOCK_FILE	"/var/run/fxsd.block"
 #define LIST_MAX	32
@@ -44,6 +47,7 @@ struct fxsd {
 static volatile sig_atomic_t stop, ring_test;
 static char own_number[CLCC_NUM_MAX];
 static const char *led_name = "green:phone";
+static int keep_days;
 
 static void on_sig(int sig)
 {
@@ -86,6 +90,23 @@ static void led(int on)
 		fputs(on ? "1" : "0", f);
 		fclose(f);
 	}
+}
+
+static void led_keep(void)
+{
+	char path[128], v[8] = "";
+	FILE *f;
+
+	if (!*led_name || !access(LED_NIGHT, F_OK))
+		return;
+	snprintf(path, sizeof(path), LED_DIR "%s/brightness", led_name);
+	if (!(f = fopen(path, "r")))
+		return;
+	if (!fgets(v, sizeof(v), f))
+		v[0] = 0;
+	fclose(f);
+	if (atoi(v) == 0)
+		led(1);
 }
 
 static void at(const char *cmd)
@@ -241,20 +262,27 @@ static void trim_log(void)
 {
 	static char lines[CALL_LOG_MAX][96];
 	char buf[96];
-	unsigned n = 0, i;
+	unsigned n = 0, total = 0, i, first;
+	time_t now = time(NULL);
+	long cutoff = keep_days > 0 && now > CLOCK_VALID ? (long)now - keep_days * 86400L : 0;
 	FILE *f = fopen(CALL_LOG, "r");
 
 	if (!f)
 		return;
-	while (fgets(buf, sizeof(buf), f))
+	while (fgets(buf, sizeof(buf), f)) {
+		total++;
+		if (cutoff && atol(buf) < cutoff)
+			continue;
 		snprintf(lines[n++ % CALL_LOG_MAX], sizeof(lines[0]), "%s", buf);
+	}
 	fclose(f);
-	if (n <= CALL_LOG_MAX)
+	if (n == total && n <= CALL_LOG_MAX)
 		return;
 	f = fopen(CALL_LOG ".tmp", "w");
 	if (!f)
 		return;
-	for (i = n - CALL_LOG_MAX; i < n; i++)
+	first = n > CALL_LOG_MAX ? n - CALL_LOG_MAX : 0;
+	for (i = first; i < n; i++)
 		fputs(lines[i % CALL_LOG_MAX], f);
 	fclose(f);
 	rename(CALL_LOG ".tmp", CALL_LOG);
@@ -481,7 +509,7 @@ static int setup(struct fxsd *d, const struct si_patch *p, int gtx, int grx)
 
 static int usage(void)
 {
-	fprintf(stderr, "usage: fxsd -p PATCH [-c CHANNEL] [-g TXDB,RXDB] [-a ATPORT] [-l VOLUME] [-r RXGAIN] [-e LED] [-b 0|1] [-i bellcore|etsi|dtmf|off] [-f] [-v]\n");
+	fprintf(stderr, "usage: fxsd -p PATCH [-c CHANNEL] [-g TXDB,RXDB] [-a ATPORT] [-l VOLUME] [-r RXGAIN] [-e LED] [-b 0|1] [-i bellcore|etsi|dtmf|off] [-k DAYS] [-f] [-v]\n");
 	return 2;
 }
 
@@ -490,14 +518,14 @@ int main(int argc, char **argv)
 	const char *patch = NULL;
 	struct fxsd d = { .ch = 1, .cid_mode = CID_BELLCORE };
 	struct si_patch p;
-	unsigned long t_modem = 0, t_hook = 0, t_ready;
+	unsigned long t_modem = 0, t_hook = 0, t_ready, t_prune;
 	int guard = 1;
 	enum line_state last = LS_BUSY + 1;
 	int gtx = -6, grx = 0, fg = 0, vol = -1, rxg = -1, o, e;
 	int ringback = 1;
 	char r[512];
 
-	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:b:i:fv")) != -1) {
+	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:b:i:k:fv")) != -1) {
 		switch (o) {
 		case 'p': patch = optarg; break;
 		case 'c': d.ch = atoi(optarg) & 1; break;
@@ -508,6 +536,7 @@ int main(int argc, char **argv)
 		case 'e': led_name = optarg; break;
 		case 'b': ringback = atoi(optarg); break;
 		case 'i': d.cid_mode = cid_mode_parse(optarg); break;
+		case 'k': keep_days = atoi(optarg); break;
 		case 'f': fg = 1; break;
 		case 'v': d.verbose = 1; break;
 		default: return usage();
@@ -551,8 +580,10 @@ int main(int argc, char **argv)
 	line_init(&d.line, &ops);
 	d.line.ringback = ringback;
 	msg(LOG_INFO, "ready on channel %u", d.ch);
+	trim_log();
 	led(1);
 	t_ready = now_ms();
+	t_prune = t_ready;
 
 	while (!stop) {
 		unsigned long now = now_ms();
@@ -576,6 +607,7 @@ int main(int argc, char **argv)
 		if (now - d.t_meas >= 2000) {
 			measure(&d);
 			write_state(&d);
+			led_keep();
 			d.t_meas = now;
 		}
 		if (d.ringing && now - d.t_ring_arm >= 1000) {
@@ -583,6 +615,10 @@ int main(int argc, char **argv)
 			d.t_ring_arm = now;
 		}
 		line_tick(&d.line, now);
+		if (keep_days > 0 && now - t_prune >= PRUNE_MS) {
+			trim_log();
+			t_prune = now;
+		}
 		if (guard && now - t_ready >= GUARD_CLEAR_MS) {
 			unlink(GUARD_FILE);
 			sync();

@@ -87,14 +87,25 @@ calls() {
 	json_dump
 }
 
+history() {
+	json_init
+	json_add_string log "$(cat "$CALLS" 2>/dev/null)"
+	json_dump
+}
+
 case "$1" in
 list)
-	echo '{ "status": {}, "calls": {}, "clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {} }'
+	echo '{ "status": {}, "calls": {}, "history": {}, "clear_history": {}, "clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {} }'
 	;;
 call)
 	case "$2" in
 	status) status ;;
 	calls) calls ;;
+	history) history ;;
+	clear_history)
+		: > "$CALLS"
+		echo '{ "result": true }'
+		;;
 	set_enabled) set_enabled ;;
 	ring_test)
 		if kill -USR1 $(pidof fxsd) 2>/dev/null; then

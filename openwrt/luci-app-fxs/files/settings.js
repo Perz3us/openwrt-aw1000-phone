@@ -10,6 +10,7 @@ return view.extend({
 
 		s = m.section(form.NamedSection, 'main', 'fxs');
 		s.tab('general', _('General'));
+		s.tab('history', _('Call history'));
 		s.tab('advanced', _('Advanced'));
 
 		o = s.taboption('general', form.Value, 'own_number', _('My number'),
@@ -43,6 +44,17 @@ return view.extend({
 		o.value('dtmf', _('DTMF'));
 		o.value('off', _('Off'));
 		o.default = 'bellcore';
+
+		o = s.taboption('history', form.Flag, 'history_autodelete', _('Delete old calls'),
+			_('Remove calls from the call history once they are older than the number of days below.'));
+		o.default = '0';
+		o.rmempty = false;
+
+		o = s.taboption('history', form.Value, 'history_days', _('Keep calls for (days)'));
+		o.datatype = 'range(1,3650)';
+		o.placeholder = '30';
+		o.default = '30';
+		o.depends('history_autodelete', '1');
 
 		o = s.taboption('advanced', form.Value, 'modem_rx_gain', _('Modem receive gain'),
 			_('AT+QRXGAIN value, 8192 is unity.'));

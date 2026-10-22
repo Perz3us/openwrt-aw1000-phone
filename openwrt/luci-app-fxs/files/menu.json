@@ -21,6 +21,15 @@
 		}
 	},
 
+	"admin/services/fxs/history": {
+		"title": "Call history",
+		"order": 15,
+		"action": {
+			"type": "view",
+			"path": "fxs/history"
+		}
+	},
+
 	"admin/services/fxs/settings": {
 		"title": "Settings",
 		"order": 20,
