@@ -31,6 +31,7 @@ if [ -n "$VERMAGIC" ]; then
 fi
 make package/feeds/aw1000/aw1000-fxs/clean >/dev/null 2>&1 || true
 make package/feeds/aw1000/aw1000-fxs/compile $KOPT -j4 || make package/feeds/aw1000/aw1000-fxs/compile $KOPT V=s
+make package/feeds/aw1000/fxsd/clean >/dev/null 2>&1 || true
 make package/feeds/aw1000/fxsd/compile -j4 || make package/feeds/aw1000/fxsd/compile V=s
 make package/feeds/aw1000/luci-app-fxs/compile -j4 || make package/feeds/aw1000/luci-app-fxs/compile V=s
 

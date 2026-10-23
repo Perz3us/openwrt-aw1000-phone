@@ -8,6 +8,7 @@
 var callStatus = rpc.declare({ object: 'fxs', method: 'status' });
 var callHistory = rpc.declare({ object: 'fxs', method: 'history', expect: { log: '' } });
 var callClear = rpc.declare({ object: 'fxs', method: 'clear_history' });
+var callDelete = rpc.declare({ object: 'fxs', method: 'delete_calls', params: [ 'lines' ] });
 
 var PAGE = 50;
 
@@ -50,7 +51,7 @@ function parse(text, live) {
 	}
 
 	function start(t, num, dir) {
-		var c = { start: t, number: num, dir: dir, connected: null, end: null, status: null };
+		var c = { start: t, number: num, dir: dir, connected: null, end: null, status: null, lines: [] };
 
 		if (open[num])
 			close(open[num], null);
@@ -60,36 +61,37 @@ function parse(text, live) {
 	}
 
 	(text || '').split('\n').forEach(function(line) {
-		var m = line.match(/^(\d+) (\S+) ?(.*)$/), t, ev, num, c;
+		var m = line.match(/^(\d+) (\S+) ?(.*)$/), t, ev, num, c, target;
 
 		if (!m)
 			return;
 		t = +m[1];
 		ev = m[2];
 		num = m[3].trim();
-		c = open[num];
+		c = target = open[num];
 
 		switch (ev) {
 		case 'dial':
 			closeAll(null);
-			start(t, num, 'out');
+			target = start(t, num, 'out');
 			break;
 		case 'incoming':
 			closeAll(null);
-			start(t, num, 'in');
+			target = start(t, num, 'in');
 			break;
 		case 'waiting':
-			start(t, num, 'in');
+			target = start(t, num, 'in');
 			break;
 		case 'blocked':
-			calls.push({ start: t, number: num, dir: 'in', connected: null, end: t, status: 'blocked' });
+			target = { start: t, number: num, dir: 'in', connected: null, end: t, status: 'blocked', lines: [] };
+			calls.push(target);
 			break;
 		case 'connected':
 		case 'answered':
 		case 'switched':
 		case 'retrieved':
 			if (!c)
-				c = start(t, num, ev == 'connected' ? 'out' : 'in');
+				c = target = start(t, num, ev == 'connected' ? 'out' : 'in');
 			if (!c.connected)
 				c.connected = t;
 			break;
@@ -108,6 +110,9 @@ function parse(text, live) {
 			closeAll(t);
 			break;
 		}
+
+		if (target)
+			target.lines.push(line);
 	});
 
 	Object.keys(open).forEach(function(k) {
@@ -172,7 +177,7 @@ return view.extend({
 	filtered: function(withType) {
 		var from = dayStart(this.from.value),
 		    to = dayStart(this.to.value),
-		    q = this.search.value.replace(/[^0-9+]/g, ''),
+		    q = this.search.value.replace(/[^0-9]/g, '').slice(-9),
 		    qn = this.search.value.trim().toLowerCase(),
 		    type = this.type.value,
 		    names = this.nameMap;
@@ -182,7 +187,7 @@ return view.extend({
 				return false;
 			if (to != null && c.start >= to + 86400)
 				return false;
-			if (qn && !(q && c.number.indexOf(q) >= 0) &&
+			if (qn && !(q && c.number.replace(/[^0-9]/g, '').indexOf(q) >= 0) &&
 			    !((names[digits(c.number)] || '').toLowerCase().indexOf(qn) >= 0))
 				return false;
 			if (!withType || type == 'all')
@@ -223,7 +228,8 @@ return view.extend({
 			E('th', { 'class': 'th' }, _('Number')),
 			E('th', { 'class': 'th' }, _('Type')),
 			E('th', { 'class': 'th' }, _('Duration')),
-			E('th', { 'class': 'th' }, _('Status'))
+			E('th', { 'class': 'th' }, _('Status')),
+			E('th', { 'class': 'th' })
 		]);
 
 		var body = rows.slice(this.page * PAGE, (this.page + 1) * PAGE).map(function(c) {
@@ -236,12 +242,17 @@ return view.extend({
 				E('td', { 'class': 'td' }, E('span', { 'class': c.dir == 'in' ? 'fxs-in' : 'fxs-out' },
 					c.dir == 'in' ? '↙ ' + _('Incoming') : '↗ ' + _('Outgoing'))),
 				E('td', { 'class': 'td' }, duration(c)),
-				E('td', { 'class': 'td' }, E('span', { 'class': bad ? 'fxs-bad' : '' }, statusText[c.status] || c.status))
+				E('td', { 'class': 'td' }, E('span', { 'class': bad ? 'fxs-bad' : '' }, statusText[c.status] || c.status)),
+				E('td', { 'class': 'td right' }, c.status == 'active' ? '' : E('button', {
+					'class': 'btn cbi-button-remove',
+					'title': _('Delete this call'),
+					'click': L.bind(this.deleteCall, this, c)
+				}, _('Delete')))
 			]);
-		});
+		}, this);
 
 		if (!body.length)
-			body = [ E('tr', { 'class': 'tr placeholder' }, E('td', { 'class': 'td', 'colspan': 5 }, E('em', _('No calls match the filters.')))) ];
+			body = [ E('tr', { 'class': 'tr placeholder' }, E('td', { 'class': 'td', 'colspan': 6 }, E('em', _('No calls match the filters.')))) ];
 
 		dom.content(this.table, [ head ].concat(body));
 
@@ -279,6 +290,25 @@ return view.extend({
 		document.body.appendChild(a);
 		a.click();
 		document.body.removeChild(a);
+	},
+
+	deleteCall: function(c) {
+		var name = this.nameMap[digits(c.number)];
+
+		ui.showModal(_('Delete call'), [
+			E('p', _('Delete the call with %s on %s from the history?').format(name || c.number || _('Private number'), new Date(c.start * 1000).toLocaleString())),
+			E('div', { 'class': 'right' }, [
+				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
+				' ',
+				E('button', { 'class': 'btn cbi-button-negative', 'click': L.bind(function() {
+					return callDelete(c.lines).then(L.bind(function() {
+						ui.hideModal();
+						this.calls = this.calls.filter(function(x) { return x !== c; });
+						this.refresh();
+					}, this));
+				}, this) }, _('Delete'))
+			])
+		]);
 	},
 
 	clearHistory: function() {

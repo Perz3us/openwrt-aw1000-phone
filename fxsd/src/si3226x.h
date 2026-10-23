@@ -95,6 +95,7 @@ int32_t si_iloop_ua(uint32_t raw);
 #define SI_LF_OPEN 0
 #define SI_LF_FWD 1
 #define SI_LF_RING 4
+#define SI_LF_REV_OHT 6
 
 struct si_ring {
 	uint32_t rtper, freq, amp, phas, offset, slope_ring, iring_lim;

@@ -9,7 +9,7 @@
 		},
 		"write": {
 			"ubus": {
-				"fxs": [ "clear_guard", "set_enabled", "ring_test", "clear_history" ]
+				"fxs": [ "clear_guard", "set_enabled", "ring_test", "clear_history", "delete_calls" ]
 			},
 			"uci": [ "fxs" ]
 		}

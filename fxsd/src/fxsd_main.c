@@ -39,15 +39,21 @@ struct fxsd {
 	struct line line;
 	uint8_t ch;
 	int ringing, audio, verbose;
-	int cid_mode, cid_pending, test_ring;
+	int cid_mode, cid_pending, cid_before, test_ring;
 	int32_t vbat_mv, vline_mv, iloop_ua;
 	unsigned long t_ring_arm, t_gap, t_meas, t_test;
+	long talk_since;
 };
 
 static volatile sig_atomic_t stop, ring_test;
 static char own_number[CLCC_NUM_MAX];
 static const char *led_name = "green:phone";
+enum { LED_OFF, LED_ON, LED_SLOW, LED_FAST };
+enum { LED_READY, LED_RINGING, LED_OFFHOOK };
+static int led_mode[3] = { LED_ON, LED_FAST, LED_SLOW };
+static int led_cur = -1;
 static int keep_days;
+static int voice_off;
 
 static void on_sig(int sig)
 {
@@ -78,35 +84,104 @@ static void msg(int prio, const char *fmt, ...)
 	va_end(ap);
 }
 
-static void led(int on)
+static void led_write(const char *file, const char *v)
 {
 	char path[128];
 	FILE *f;
 
-	if (!*led_name)
-		return;
-	snprintf(path, sizeof(path), LED_DIR "%s/brightness", led_name);
+	snprintf(path, sizeof(path), LED_DIR "%s/%s", led_name, file);
 	if ((f = fopen(path, "w"))) {
-		fputs(on ? "1" : "0", f);
+		fputs(v, f);
 		fclose(f);
 	}
 }
 
-static void led_keep(void)
+static int led_read(const char *file, char *buf, size_t n)
 {
-	char path[128], v[8] = "";
+	char path[128];
 	FILE *f;
+	size_t got;
 
-	if (!*led_name || !access(LED_NIGHT, F_OK))
-		return;
-	snprintf(path, sizeof(path), LED_DIR "%s/brightness", led_name);
+	snprintf(path, sizeof(path), LED_DIR "%s/%s", led_name, file);
 	if (!(f = fopen(path, "r")))
-		return;
-	if (!fgets(v, sizeof(v), f))
-		v[0] = 0;
+		return -1;
+	got = fread(buf, 1, n - 1, f);
+	buf[got] = 0;
 	fclose(f);
-	if (atoi(v) == 0)
-		led(1);
+	return 0;
+}
+
+static void led_set(int mode)
+{
+	if (!*led_name)
+		return;
+	if (mode == LED_SLOW || mode == LED_FAST) {
+		const char *ms = mode == LED_FAST ? "120" : "600";
+
+		led_write("trigger", "timer");
+		led_write("delay_on", ms);
+		led_write("delay_off", ms);
+	} else {
+		led_write("trigger", "none");
+		led_write("brightness", mode == LED_ON ? "1" : "0");
+	}
+	led_cur = mode;
+}
+
+static void led_update(int mode, int verify)
+{
+	char buf[512];
+
+	if (!*led_name)
+		return;
+	if (!access(LED_NIGHT, F_OK)) {
+		led_cur = -1;
+		return;
+	}
+	if (mode != led_cur) {
+		led_set(mode);
+		return;
+	}
+	if (!verify || led_read("trigger", buf, sizeof(buf)))
+		return;
+	if (mode == LED_SLOW || mode == LED_FAST) {
+		if (!strstr(buf, "[timer]"))
+			led_set(mode);
+	} else if (!strstr(buf, "[none]") ||
+		   led_read("brightness", buf, sizeof(buf)) || (atoi(buf) != 0) != (mode == LED_ON)) {
+		led_set(mode);
+	}
+}
+
+static int led_want(const struct fxsd *d)
+{
+	if (d->ringing || d->test_ring)
+		return led_mode[LED_RINGING];
+	if (d->line.offhook || d->line.state != LS_IDLE)
+		return led_mode[LED_OFFHOOK];
+	return led_mode[LED_READY];
+}
+
+static int led_parse(const char *s)
+{
+	if (!strncmp(s, "slow", 4))
+		return LED_SLOW;
+	if (!strncmp(s, "fast", 4))
+		return LED_FAST;
+	if (!strncmp(s, "off", 3))
+		return LED_OFF;
+	return LED_ON;
+}
+
+static void led_modes_parse(const char *s)
+{
+	int i;
+
+	for (i = 0; i < 3 && s; i++) {
+		led_mode[i] = led_parse(s);
+		if ((s = strchr(s, ',')))
+			s++;
+	}
 }
 
 static void at(const char *cmd)
@@ -138,8 +213,20 @@ static void op_ring(void *c, int on)
 	uint8_t lf;
 
 	if (on) {
+		if (d->cid_before && d->cid_mode != CID_OFF && !d->line.recall && !d->test_ring) {
+			struct tm tm;
+			time_t t = time(NULL);
+			unsigned long t0 = now_ms();
+			int e;
+
+			localtime_r(&t, &tm);
+			if ((e = cid_send_before(&d->s, d->ch, d->cid_mode, d->line.peer, &tm)))
+				msg(LOG_WARNING, "caller ID failed: %s", strerror(-e));
+			else
+				msg(LOG_INFO, "caller ID sent before ring in %lu ms", now_ms() - t0);
+		}
 		fxsdev_ring_arm(&d->s, RING_ARM_MS);
-		d->cid_pending = d->cid_mode != CID_OFF;
+		d->cid_pending = d->cid_mode != CID_OFF && !d->cid_before;
 		d->t_gap = 0;
 		d->t_ring_arm = now_ms();
 		si_linefeed(&d->s, d->ch, SI_LF_RING);
@@ -165,9 +252,15 @@ static void op_audio(void *c, int on)
 static void op_dial(void *c, const char *num)
 {
 	char cmd[64];
+	size_t n = 3;
 
 	(void)c;
-	snprintf(cmd, sizeof(cmd), "ATD%s;", num);
+	memcpy(cmd, "ATD", 3);
+	for (; *num && n + 2 < sizeof(cmd); num++)
+		if (strchr("0123456789*#+", *num))
+			cmd[n++] = *num;
+	cmd[n++] = ';';
+	cmd[n] = 0;
 	at(cmd);
 }
 
@@ -327,9 +420,9 @@ static void write_state(struct fxsd *d)
 
 	if (!f)
 		return;
-	fprintf(f, "state=%s\npeer=%s\noffhook=%d\nvbat=%d\nvline=%d\niloop=%d\nown=%s\ntest=%d\n",
+	fprintf(f, "state=%s\npeer=%s\noffhook=%d\nvbat=%d\nvline=%d\niloop=%d\nown=%s\ntest=%d\nvoiceoff=%d\nsince=%ld\n",
 		line_state_name(d->line.state), d->line.peer, d->line.offhook,
-		d->vbat_mv, d->vline_mv, d->iloop_ua, own_number, d->test_ring);
+		d->vbat_mv, d->vline_mv, d->iloop_ua, own_number, d->test_ring, voice_off, d->talk_since);
 	fclose(f);
 	rename(STATE_FILE ".tmp", STATE_FILE);
 }
@@ -357,9 +450,9 @@ static void test_ring_tick(struct fxsd *d, unsigned long now)
 		if (d->test_ring) {
 			stop_test = 1;
 		} else if (d->line.state == LS_IDLE && !d->ringing && !d->line.offhook) {
+			d->test_ring = 1;
 			op_ring(d, 1);
 			d->cid_pending = 0;
-			d->test_ring = 1;
 			d->t_test = now;
 			msg(LOG_INFO, "test ring");
 			write_state(d);
@@ -381,11 +474,26 @@ static void read_own_number(void)
 
 	if (modem_at("AT+CNUM", r, sizeof(r)) || !(p = strstr(r, "+CNUM:")) || !(p = strchr(p, ',')))
 		return;
-	for (p++; *p == '"' || *p == ' '; p++)
+	for (p++; *p == '"' || *p == '\\' || *p == ' '; p++)
 		;
 	while (n + 1 < sizeof(own_number) && ((*p >= '0' && *p <= '9') || *p == '+'))
 		own_number[n++] = *p++;
 	own_number[n] = 0;
+}
+
+static void check_voice(void)
+{
+	char r[256];
+	const char *p;
+
+	if (modem_at("AT+QCFG=\"call_control\"", r, sizeof(r)) || !(p = strstr(r, "+QCFG:")) ||
+	    !(p = strstr(p, "call_control")))
+		return;
+	while (*p && (*p < '0' || *p > '9'))
+		p++;
+	voice_off = *p == '1';
+	if (voice_off)
+		msg(LOG_WARNING, "voice calls are turned off in the modem; run AT+QCFG=\"call_control\",0,0 and restart the modem");
 }
 
 static int wait_modem(void)
@@ -509,7 +617,7 @@ static int setup(struct fxsd *d, const struct si_patch *p, int gtx, int grx)
 
 static int usage(void)
 {
-	fprintf(stderr, "usage: fxsd -p PATCH [-c CHANNEL] [-g TXDB,RXDB] [-a ATPORT] [-l VOLUME] [-r RXGAIN] [-e LED] [-b 0|1] [-i bellcore|etsi|dtmf|off] [-k DAYS] [-f] [-v]\n");
+	fprintf(stderr, "usage: fxsd -p PATCH [-c CHANNEL] [-g TXDB,RXDB] [-a ATPORT] [-l VOLUME] [-r RXGAIN] [-e LED] [-m READY,RINGING,OFFHOOK] [-b 0|1] [-i bellcore|etsi|dtmf|off] [-t before|after] [-k DAYS] [-f] [-v]\n");
 	return 2;
 }
 
@@ -525,7 +633,7 @@ int main(int argc, char **argv)
 	int ringback = 1;
 	char r[512];
 
-	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:b:i:k:fv")) != -1) {
+	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:fv")) != -1) {
 		switch (o) {
 		case 'p': patch = optarg; break;
 		case 'c': d.ch = atoi(optarg) & 1; break;
@@ -534,8 +642,10 @@ int main(int argc, char **argv)
 		case 'l': vol = atoi(optarg); break;
 		case 'r': rxg = atoi(optarg); break;
 		case 'e': led_name = optarg; break;
+		case 'm': led_modes_parse(optarg); break;
 		case 'b': ringback = atoi(optarg); break;
 		case 'i': d.cid_mode = cid_mode_parse(optarg); break;
+		case 't': d.cid_before = !strcmp(optarg, "before"); break;
 		case 'k': keep_days = atoi(optarg); break;
 		case 'f': fg = 1; break;
 		case 'v': d.verbose = 1; break;
@@ -558,6 +668,7 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	read_own_number();
+	check_voice();
 	if (vol >= 0 && vol <= 5) {
 		snprintf(r, sizeof(r), "AT+CLVL=%d", vol);
 		at(r);
@@ -581,7 +692,7 @@ int main(int argc, char **argv)
 	d.line.ringback = ringback;
 	msg(LOG_INFO, "ready on channel %u", d.ch);
 	trim_log();
-	led(1);
+	led_update(led_want(&d), 0);
 	t_ready = now_ms();
 	t_prune = t_ready;
 
@@ -607,7 +718,7 @@ int main(int argc, char **argv)
 		if (now - d.t_meas >= 2000) {
 			measure(&d);
 			write_state(&d);
-			led_keep();
+			led_update(led_want(&d), 1);
 			d.t_meas = now;
 		}
 		if (d.ringing && now - d.t_ring_arm >= 1000) {
@@ -615,6 +726,7 @@ int main(int argc, char **argv)
 			d.t_ring_arm = now;
 		}
 		line_tick(&d.line, now);
+		led_update(led_want(&d), 0);
 		if (keep_days > 0 && now - t_prune >= PRUNE_MS) {
 			trim_log();
 			t_prune = now;
@@ -626,6 +738,7 @@ int main(int argc, char **argv)
 		}
 		if (d.line.state != last) {
 			last = d.line.state;
+			d.talk_since = last == LS_TALKING ? (long)time(NULL) : 0;
 			if (d.verbose)
 				msg(LOG_DEBUG, "state %s", line_state_name(last));
 			write_state(&d);
@@ -635,7 +748,7 @@ int main(int argc, char **argv)
 	if (d.line.state == LS_CALLING || d.line.state == LS_TALKING)
 		at("AT+CHUP");
 out:
-	led(0);
+	led_set(LED_OFF);
 	fxsdev_ring_arm(&d.s, 0);
 	fxsdev_bridge(&d.s, 0);
 	si_power_down(&d.s, d.ch);

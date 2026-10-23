@@ -11,6 +11,7 @@ return view.extend({
 		s = m.section(form.NamedSection, 'main', 'fxs');
 		s.tab('general', _('General'));
 		s.tab('history', _('Call history'));
+		s.tab('led', _('LED'));
 		s.tab('advanced', _('Advanced'));
 
 		o = s.taboption('general', form.Value, 'own_number', _('My number'),
@@ -38,12 +39,19 @@ return view.extend({
 		o.rmempty = false;
 
 		o = s.taboption('general', form.ListValue, 'callerid', _('Caller ID'),
-			_('Sends the caller\'s number to phones with a display after the first ring. If your phone shows nothing, try another format.'));
+			_('Sends the caller\'s number to phones with a display. If your phone shows nothing, try another format or timing.'));
 		o.value('bellcore', _('FSK (Bellcore)'));
 		o.value('etsi', _('FSK (ETSI)'));
 		o.value('dtmf', _('DTMF'));
 		o.value('off', _('Off'));
 		o.default = 'bellcore';
+
+		o = s.taboption('general', form.ListValue, 'callerid_timing', _('Caller ID timing'),
+			_('Most phones in North America expect the number after the first ring. Most phones in Europe expect it before the first ring, usually with FSK (ETSI) or DTMF.'));
+		o.value('after', _('After the first ring'));
+		o.value('before', _('Before the first ring'));
+		o.default = 'after';
+		o.depends({ callerid: 'off', '!reverse': true });
 
 		o = s.taboption('history', form.Flag, 'history_autodelete', _('Delete old calls'),
 			_('Remove calls from the call history once they are older than the number of days below.'));
@@ -60,8 +68,21 @@ return view.extend({
 			_('AT+QRXGAIN value, 8192 is unity.'));
 		o.datatype = 'range(0,65535)';
 
-		o = s.taboption('advanced', form.Value, 'led', _('Phone LED'),
-			_('LED that is on while the port is on. Leave empty to not use an LED.'));
+		[
+			[ 'led_ready', _('Line ready'), 'on' ],
+			[ 'led_ringing', _('Incoming call'), 'fast' ],
+			[ 'led_offhook', _('Handset off hook'), 'slow' ]
+		].forEach(function(l) {
+			o = s.taboption('led', form.ListValue, l[0], l[1]);
+			o.value('on', _('Solid'));
+			o.value('slow', _('Slow blink'));
+			o.value('fast', _('Fast blink'));
+			o.value('off', _('Off'));
+			o.default = l[2];
+		});
+
+		o = s.taboption('led', form.Value, 'led', _('LED'),
+			_('The AW1000 phone LED is green only. Leave empty to not use an LED. When the port is off the LED is off.'));
 		o.placeholder = 'green:phone';
 
 		o = s.taboption('advanced', form.ListValue, 'channel', _('SLIC channel'),

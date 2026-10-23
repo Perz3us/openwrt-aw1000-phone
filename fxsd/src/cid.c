@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <string.h>
 #include "cid.h"
+#include "si3226x.h"
 #include "si3226x_map.h"
 
 #define WR(r, v) do { int _e = s->wr(s->ctx, ch, (r), (v)); if (_e) return _e; } while (0)
@@ -188,6 +189,22 @@ static int dtmf_digit(struct slic *s, uint8_t ch, char d)
 	return 0;
 }
 
+static int dtas(struct slic *s, uint8_t ch)
+{
+	WR(SI_OCON, 0);
+	WRRAM(RAM_OSC1FREQ, 0x1F2F0000);
+	WRRAM(RAM_OSC1FREQ + 1, 0x01BD0000);
+	WRRAM(RAM_OSC1FREQ + 2, 0);
+	WRRAM(RAM_OSC1FREQ + 3, 0x1B8E0000);
+	WRRAM(RAM_OSC1FREQ + 4, 0x02EFC000);
+	WRRAM(RAM_OSC1FREQ + 5, 0);
+	WR(SI_OMODE, 0x66);
+	WR(SI_OCON, 0x11);
+	s->delay(s->ctx, 100);
+	WR(SI_OCON, 0);
+	return 0;
+}
+
 static int dtmf_send(struct slic *s, uint8_t ch, const char *number)
 {
 	int e;
@@ -225,4 +242,25 @@ int cid_send(struct slic *s, uint8_t ch, int mode, const char *number, const str
 	default:
 		return 0;
 	}
+}
+
+int cid_send_before(struct slic *s, uint8_t ch, int mode, const char *number, const struct tm *t)
+{
+	int e;
+
+	if (mode == CID_OFF)
+		return 0;
+	if ((e = si_linefeed(s, ch, SI_LF_REV_OHT)))
+		return e;
+	s->delay(s->ctx, 150);
+	if (mode != CID_DTMF) {
+		if ((e = dtas(s, ch)))
+			goto out;
+		s->delay(s->ctx, 60);
+	}
+	e = cid_send(s, ch, mode, number, t);
+	s->delay(s->ctx, 200);
+out:
+	si_linefeed(s, ch, SI_LF_FWD);
+	return e;
 }

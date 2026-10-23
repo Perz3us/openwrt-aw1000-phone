@@ -22,12 +22,13 @@ starts by itself after a reboot.
 
 Other things that work:
 
-- Caller ID on phones with a display (FSK Bellcore, FSK ETSI or DTMF)
+- Caller ID on phones with a display (FSK Bellcore, FSK ETSI or DTMF, before or after the first ring)
 - Ringing tone in the handset while the other side rings
 - Hold: press FLASH during a call, press it again to come back
 - Speed dial: save a number under a code and dial `*1`, `*2` and so on
 - Blocked numbers, including hidden numbers if you want
-- The phone LED on the router is on while the port is on
+- The phone LED shows the line state: solid when ready, fast blink when a call comes in, slow
+  blink while the handset is off hook (each can be changed)
 - Line test in LuCI with line voltage, loop current and a button to ring the phone
 - Call history with search, filters, CSV export and optional auto delete
 
@@ -48,11 +49,18 @@ the release are for NoobWRT 25.12.5. For other firmware, build them yourself (se
 
 ## Install
 
-Copy the apk files from the release to the router and install them:
+Download the three apk files from the latest release to `/tmp` on the router (or copy them
+there with scp) and install them:
 
 ```
-apk add --allow-untrusted kmod-aw1000-fxs-*.apk fxsd-*.apk luci-app-fxs-*.apk
+cd /tmp
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.3.1/kmod-aw1000-fxs-6.12.94.0.1.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.3.1/fxsd-0.3.1-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.3.1/luci-app-fxs-0.3.1-r1.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.1.0-r1.apk /tmp/fxsd-0.3.1-r1.apk /tmp/luci-app-fxs-0.3.1-r1.apk
 ```
+
+When updating, run `/etc/init.d/fxsd restart` afterwards and reload LuCI with Ctrl+F5.
 
 Put the modem audio interface in slave mode. You only do this once, the modem remembers it.
 The modem restarts, so the internet drops for a minute.
@@ -100,7 +108,11 @@ Call history, Settings, Speed dial and Blocked numbers. The same settings are in
 | `patch` | `/etc/fxs/si3226x_patch.bin` | patch file |
 | `ringback` | `1` | ringing tone while the other side rings |
 | `callerid` | `bellcore` | caller ID format: bellcore, etsi, dtmf or off |
-| `led` | `green:phone` | LED that is on while the port is on, empty to leave it alone |
+| `callerid_timing` | `after` | send caller ID `after` the first ring (North America) or `before` it (most of Europe) |
+| `led` | `green:phone` | LED to use, empty to leave it alone |
+| `led_ready` | `on` | LED when the line is ready: on, slow, fast or off |
+| `led_ringing` | `fast` | LED while a call comes in |
+| `led_offhook` | `slow` | LED while the handset is off hook |
 | `block_private` | `0` | reject calls without a number |
 | `history_autodelete` | `0` | delete old calls from the call history |
 | `history_days` | `30` | how many days of calls to keep when that is on |
@@ -113,6 +125,26 @@ Logs: `logread -e fxsd`. Call log: `/etc/fxs/calls.log`.
 
 If the router reboots while fxsd is starting up, it won't start again on that boot, just in
 case it was the cause. Run `/etc/init.d/fxsd clear_guard` or press the button in LuCI.
+
+## Problems
+
+Calls fail straight away and the log shows `call failed`: check that the modem has voice calls
+turned on. Some modems come with `call_control` set to `1,1`, which blocks all calls. fxsd
+warns about this in the log and on the Status page.
+
+```
+ubus call at-daemon sendat '{"at_port":"/dev/ttyUSB2","at_cmd":"AT+QCFG=\"call_control\"","timeout":3}'
+ubus call at-daemon sendat '{"at_port":"/dev/ttyUSB2","at_cmd":"AT+QCFG=\"call_control\",0,0","timeout":3}'
+```
+
+On official OpenWrt, ModemManager also reads the modem AT port and takes the answers meant for
+fxsd. Stop it or remove it if calls are not picked up.
+
+The phone does not ring or LuCI says "Modem audio not set to slave mode": run the `AT+QDAI`
+step from Install again and restart the modem.
+
+New tabs or settings do not show up after an update: the browser has the old pages cached,
+press Ctrl+F5 on the page.
 
 ## Building
 

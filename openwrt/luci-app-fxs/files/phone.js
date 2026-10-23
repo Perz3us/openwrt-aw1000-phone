@@ -54,6 +54,7 @@ var css = '\
 .fxs-phone.modem_master .fxs-state::before { background: #e5534b; }\
 .fxs-phone.disabled svg, .fxs-phone.waiting_modem svg, .fxs-phone.modem_master svg { opacity: .3; filter: grayscale(1); }\
 .fxs-phone .fxs-peer { margin-top: 6px; opacity: .75; min-height: 1.2em; font-variant-numeric: tabular-nums; }\
+.fxs-phone .fxs-timer { font-size: 1.6em; font-weight: bold; color: #2e8b3e; min-height: 1.2em; font-variant-numeric: tabular-nums; }\
 @keyframes fxs-blink { 0%,100% { opacity: 1; } 50% { opacity: .25; } }\
 .fxs-switch { min-width: 170px; font-size: 1.05em; }\
 @keyframes fxs-shake { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-4deg); } 75% { transform: rotate(4deg); } }\
@@ -148,6 +149,13 @@ function statusRows(st) {
 	});
 }
 
+function fmtDuration(s) {
+	var h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+
+	s = s % 60;
+	return (h ? h + ':' + (m < 10 ? '0' : '') : '') + m + ':' + (s < 10 ? '0' : '') + s;
+}
+
 function phoneState(st) {
 	if (!st.running)
 		return 'stopped';
@@ -168,6 +176,7 @@ return view.extend({
 		this.phone.className = 'fxs-phone ' + s + (off ? ' offhook' : '') + (st.enabled === false ? ' disabled' : '');
 		this.phoneLabel.textContent = st.enabled === false ? _('Phone port off') : (stateText[s] || s);
 		this.phonePeer.textContent = (s === 'ringing' || s === 'calling' || s === 'talking') && st.peer ? st.peer : '';
+		this.phoneTimer.textContent = s === 'talking' && st.duration != null ? fmtDuration(st.duration) : '';
 
 		this.toggle.textContent = st.enabled === false ? _('Phone port: OFF') : _('Phone port: ON');
 		this.toggle.className = 'btn fxs-switch ' + (st.enabled === false ? 'cbi-button-negative' : 'cbi-button-positive');
@@ -181,6 +190,11 @@ return view.extend({
 	},
 
 	renderGuard: function(st) {
+		if (st.running && st.voiceoff)
+			return E('div', { 'class': 'alert-message warning' }, [
+				E('p', _('Voice calls are turned off in the modem, so every call will fail. Run this on the router and restart the modem:')),
+				E('pre', 'ubus call at-daemon sendat \'{"at_port":"/dev/ttyUSB2","at_cmd":"AT+QCFG=\\"call_control\\",0,0","timeout":3}\'')
+			]);
 		if (!st.guard || st.running)
 			return E('div');
 
@@ -232,8 +246,10 @@ return view.extend({
 		this.phone.innerHTML = phoneSvg;
 		this.phoneLabel = E('div', { 'class': 'fxs-state' });
 		this.phonePeer = E('div', { 'class': 'fxs-peer' });
+		this.phoneTimer = E('div', { 'class': 'fxs-timer' });
 		this.phone.appendChild(this.phoneLabel);
 		this.phone.appendChild(this.phonePeer);
+		this.phone.appendChild(this.phoneTimer);
 		this.toggle = E('button', { 'click': ui.createHandlerFn(this, 'handleToggle') });
 		this.ringBtn = E('button', { 'click': ui.createHandlerFn(this, 'handleRingTest') });
 		this.updatePhone(st);
