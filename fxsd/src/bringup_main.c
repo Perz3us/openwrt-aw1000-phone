@@ -190,7 +190,7 @@ static void txtest(struct slic *s, uint8_t ch)
 static int usage(void)
 {
 	fprintf(stderr, "usage: fxs-bringup --patch FILE [--power [--linefeed fwd [--ring SECONDS | --dialtone] [--pcm TXCOUNT,RXCOUNT]]]\n"
-		"       [--capture BITMAP] [--bridge AIN,AOUT,BIN,BOUT] [--chan 0|1] [--hold SECONDS]\n");
+		"       [--wb] [--capture BITMAP] [--bridge AIN,AOUT,BIN,BOUT] [--chan 0|1] [--hold SECONDS]\n");
 	return 2;
 }
 
@@ -203,7 +203,7 @@ int main(int argc, char **argv)
 	int power = 0, hold = 0, fwd = 0, ring = 0, dial = 0, i, e, q;
 	int pcm_tx = -1, pcm_rx = -1, br_a = -1, br_b = -1, br_c = -1, br_d = -1;
 	unsigned mask = 3, cap = 0;
-	int txt = 0;
+	int txt = 0, wb = 0;
 	struct si_imp imp = aw1000_imp_600;
 	int gtx = 0, grx = 0;
 
@@ -224,6 +224,8 @@ int main(int argc, char **argv)
 			sscanf(argv[++i], "%d,%d", &pcm_tx, &pcm_rx);
 		else if (!strcmp(argv[i], "--gain") && i + 1 < argc)
 			sscanf(argv[++i], "%d,%d", &gtx, &grx);
+		else if (!strcmp(argv[i], "--wb"))
+			wb = 1;
 		else if (!strcmp(argv[i], "--txtest"))
 			txt = 1;
 		else if (!strcmp(argv[i], "--capture") && i + 1 < argc)
@@ -289,11 +291,13 @@ int main(int argc, char **argv)
 		}
 		if (pcm_tx >= 0) {
 			if ((!dial && (e = si_zsynth_setup(&s, i, &imp))) ||
-			    (e = si_pcm_setup(&s, i, pcm_tx, pcm_rx))) {
+			    (e = si_pcm_setup(&s, i, pcm_tx, pcm_rx)) ||
+			    (wb && (e = si_pcm_wideband(&s, i)))) {
 				fprintf(stderr, "pcm setup ch%d failed: %s\n", i, strerror(-e));
 				goto out;
 			}
-			printf("ch%d pcm 16-bit linear tx slot %d rx slot %d\n", i, pcm_tx, pcm_rx);
+			printf("ch%d pcm 16-bit linear%s tx slot %d rx slot %d\n", i, wb ? " wideband" : "",
+			       pcm_tx, pcm_rx);
 		}
 		if (ring) {
 			if ((e = si_ring_setup(&s, i, &aw1000_ring, &aw1000_gen_cfg)) ||
@@ -313,7 +317,7 @@ int main(int argc, char **argv)
 		if (mask & (1u << i))
 			txtest(&s, i);
 	if (br_a >= 0) {
-		if ((e = fxsdev_bridge(&s, (br_a & 0x3f) | ((br_b & 0x3f) << 8) | ((br_c & 0x3f) << 16) | ((uint32_t)(br_d & 0x3f) << 24) | 0x80000000u))) {
+		if ((e = fxsdev_bridge(&s, (br_a & 0x3f) | ((br_b & 0x3f) << 8) | ((br_c & 0x3f) << 16) | ((uint32_t)(br_d & 0x3f) << 24) | 0x80000000u | (wb ? 0x40000000u : 0)))) {
 			fprintf(stderr, "bridge failed: %s\n", strerror(-e));
 			goto out;
 		}
@@ -348,6 +352,8 @@ int main(int argc, char **argv)
 			}
 			report(&s, c, NULL);
 		}
+		if (cap)
+			capture(&s, cap);
 		if (br_a >= 0) {
 			uint32_t st[6];
 

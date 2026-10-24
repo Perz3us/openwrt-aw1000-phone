@@ -32,7 +32,7 @@ add_block() {
 
 start_service() {
 	local enabled channel tx_gain rx_gain at_port volume modem_rx_gain patch led ringback callerid block_private
-	local history_autodelete history_days callerid_timing led_ready led_ringing led_offhook
+	local history_autodelete history_days callerid_timing led_ready led_ringing led_offhook hd
 
 	config_load fxs
 	config_get_bool enabled main enabled 1
@@ -49,6 +49,7 @@ start_service() {
 	config_get led_ringing main led_ringing fast
 	config_get led_offhook main led_offhook slow
 	config_get_bool ringback main ringback 1
+	config_get_bool hd main hd 0
 	config_get callerid main callerid bellcore
 	config_get callerid_timing main callerid_timing after
 	config_get_bool history_autodelete main history_autodelete 0
@@ -82,7 +83,7 @@ start_service() {
 
 	procd_open_instance
 	procd_set_param command /usr/sbin/fxsd -p "$patch" -c "$channel" -g "$tx_gain,$rx_gain" \
-		-a "$at_port" -l "$volume" -r "$modem_rx_gain" -e "$led" -m "$led_ready,$led_ringing,$led_offhook" -b "$ringback" -i "$callerid" -t "$callerid_timing" -k "$history_days"
+		-a "$at_port" -l "$volume" -r "$modem_rx_gain" -e "$led" -m "$led_ready,$led_ringing,$led_offhook" -b "$ringback" -i "$callerid" -t "$callerid_timing" -k "$history_days" -w "$hd"
 	procd_set_param file /var/run/fxsd.speed /var/run/fxsd.block
 	procd_set_param respawn 3600 10 5
 	procd_close_instance

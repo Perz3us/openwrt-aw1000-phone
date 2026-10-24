@@ -22,6 +22,7 @@ starts by itself after a reboot.
 
 Other things that work:
 
+- HD calling (16 kHz wideband audio), off by default, turn it on in Settings
 - Caller ID on phones with a display (FSK Bellcore, FSK ETSI or DTMF, before or after the first ring)
 - Ringing tone in the handset while the other side rings
 - Hold: press FLASH during a call, press it again to come back
@@ -54,13 +55,14 @@ there with scp) and install them:
 
 ```
 cd /tmp
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.3.2/kmod-aw1000-fxs-6.12.94.0.1.0-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.3.2/fxsd-0.3.2-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.3.2/luci-app-fxs-0.3.2-r1.apk
-apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.1.0-r1.apk /tmp/fxsd-0.3.2-r1.apk /tmp/luci-app-fxs-0.3.2-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.4.0/kmod-aw1000-fxs-6.12.94.0.2.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.4.0/fxsd-0.4.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.4.0/luci-app-fxs-0.4.0-r1.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.2.0-r1.apk /tmp/fxsd-0.4.0-r1.apk /tmp/luci-app-fxs-0.4.0-r1.apk
 ```
 
-When updating, run `/etc/init.d/fxsd restart` afterwards and reload LuCI with Ctrl+F5.
+When updating, always update all three together (HD calling needs the 0.2.0 driver), then run
+`/etc/init.d/fxsd restart` and reload LuCI with Ctrl+F5.
 
 Put the modem audio interface in slave mode. You only do this once, the modem remembers it.
 The modem restarts, so the internet drops for a minute.
@@ -70,7 +72,8 @@ ubus call at-daemon sendat '{"at_port":"/dev/ttyUSB2","at_cmd":"AT+QDAI=x,1,0,4,
 ubus call at-daemon sendat '{"at_port":"/dev/ttyUSB2","at_cmd":"AT+CFUN=1,1","timeout":3}'
 ```
 
-(To go back to the factory setting use `AT+QDAI=x,0,0,4,0,0,1,1` and restart the modem again.)
+(To go back to the factory setting use `AT+QDAI=x,0,0,4,0,0,1,1` and restart the modem again.
+You don't need to change the sample rate yourself for HD calling, fxsd does that.)
 
 Copy the patch file to `/etc/fxs/si3226x_patch.bin`, then turn the port on in LuCI
 (Services > Phone (RJ11)) or run:
@@ -107,6 +110,7 @@ Call history, Settings, Speed dial and Blocked numbers. The same settings are in
 | `at_port` | `/dev/ttyUSB2` | modem AT port |
 | `patch` | `/etc/fxs/si3226x_patch.bin` | patch file |
 | `ringback` | `1` | ringing tone while the other side rings |
+| `hd` | `0` | HD calling (16 kHz). Changing it restarts the modem, mobile data drops for about 30 seconds |
 | `callerid` | `bellcore` | caller ID format: bellcore, etsi, dtmf or off |
 | `callerid_timing` | `after` | send caller ID `after` the first ring (North America) or `before` it (most of Europe) |
 | `led` | `green:phone` | LED to use, empty to leave it alone |
@@ -142,6 +146,9 @@ fxsd. Stop it or remove it if calls are not picked up.
 
 The phone does not ring or LuCI says "Modem audio not set to slave mode": run the `AT+QDAI`
 step from Install again and restart the modem.
+
+Calls sound harsh or buzzy with HD calling on: the kernel driver is older than 0.2.0. Install
+the kmod package from the same release, or turn HD calling off.
 
 New tabs or settings do not show up after an update: the browser has the old pages cached,
 press Ctrl+F5 on the page.

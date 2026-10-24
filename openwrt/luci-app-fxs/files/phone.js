@@ -20,6 +20,7 @@ var stateText = {
 	busy: _('Busy tone'),
 	waiting_modem: _('Waiting for modem'),
 	modem_master: _('Modem audio not set to slave mode'),
+	modem_restart: _('Restarting modem'),
 	stopped: _('Stopped')
 };
 
@@ -50,9 +51,9 @@ var css = '\
 .fxs-phone.ringing .fxs-state::before { background: #e0a800; animation: fxs-blink 1s infinite; }\
 .fxs-phone.talking .fxs-state::before { background: #3fb950; animation: fxs-blink 1.2s infinite; }\
 .fxs-phone.busy .fxs-state::before { background: #e5534b; }\
-.fxs-phone.disabled .fxs-state::before, .fxs-phone.stopped .fxs-state::before, .fxs-phone.waiting_modem .fxs-state::before { background: #8b919b; animation: none; }\
+.fxs-phone.disabled .fxs-state::before, .fxs-phone.stopped .fxs-state::before, .fxs-phone.waiting_modem .fxs-state::before, .fxs-phone.modem_restart .fxs-state::before { background: #8b919b; animation: none; }\
 .fxs-phone.modem_master .fxs-state::before { background: #e5534b; }\
-.fxs-phone.disabled svg, .fxs-phone.waiting_modem svg, .fxs-phone.modem_master svg { opacity: .3; filter: grayscale(1); }\
+.fxs-phone.disabled svg, .fxs-phone.waiting_modem svg, .fxs-phone.modem_master svg, .fxs-phone.modem_restart svg { opacity: .3; filter: grayscale(1); }\
 .fxs-phone .fxs-peer { margin-top: 6px; opacity: .75; min-height: 1.2em; font-variant-numeric: tabular-nums; }\
 .fxs-phone .fxs-timer { font-size: 1.6em; font-weight: bold; color: #2e8b3e; min-height: 1.2em; font-variant-numeric: tabular-nums; }\
 @keyframes fxs-blink { 0%,100% { opacity: 1; } 50% { opacity: .25; } }\
@@ -135,6 +136,7 @@ function statusRows(st) {
 		[ _('Line'), stateText[st.state] || st.state ],
 		[ _('My number'), st.own || _('unknown, set it in Settings') ],
 		[ _('Handset'), st.offhook ? _('off hook') : _('on hook') ],
+		[ _('Audio'), !st.running ? '-' : (st.hd ? _('HD (16 kHz)') : _('Normal (8 kHz)')) ],
 		[ _('Number'), [ 'ringing', 'calling', 'talking' ].indexOf(st.state) >= 0 && st.peer ? st.peer : '-' ],
 		[ _('Service running'), yesno(st.running) ],
 		[ _('Kernel module loaded'), yesno(st.module) ],

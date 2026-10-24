@@ -9,7 +9,7 @@ CALLS=/etc/fxs/calls.log
 GUARD=/etc/fxs/.starting
 
 status() {
-	local state=stopped peer= offhook=0 vbat= vline= iloop= own= testring=0 voiceoff=0 since=0 k v patch
+	local state=stopped peer= offhook=0 vbat= vline= iloop= own= testring=0 voiceoff=0 since=0 hd=0 k v patch
 
 	if [ -f "$STATE" ]; then
 		while IFS='=' read -r k v; do
@@ -24,6 +24,7 @@ status() {
 			test) testring="$v" ;;
 			voiceoff) voiceoff="$v" ;;
 			since) since="$v" ;;
+			hd) hd="$v" ;;
 			esac
 		done < "$STATE"
 	fi
@@ -36,6 +37,7 @@ status() {
 	json_add_boolean offhook "$offhook"
 	json_add_boolean testring "$testring"
 	json_add_boolean voiceoff "$voiceoff"
+	json_add_boolean hd "$hd"
 	[ "$state" = talking ] && [ "${since:-0}" -gt 0 ] && json_add_int duration $(($(date +%s) - since))
 	[ -n "$vbat" ] && json_add_int vbat "$vbat"
 	[ -n "$vline" ] && json_add_int vline "$vline"

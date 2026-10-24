@@ -56,6 +56,22 @@ Timing: both chips send one PCLK after the slot boundary. Modem "slot 1" sends o
 So: read modem from slot 1, write modem to slot 0, phone is slot 32 both ways. The bridge
 thread runs every ~1 ms with 24 frames queued in TX.
 
+The TX and RX FIFOs hold 320 words each.
+
+## Wideband (HD)
+
+The Si32261 keeps FSYNC at 8 kHz in wideband mode and sends a second sample half a frame
+(128 bits) after the first. The modem with `AT+QDAI=x,1,0,4,0,1,1,1` (16 kHz, 2048 kHz clock)
+counts 128 bit frames on its own, so with the same 8 kHz FSYNC it lines up: modem at bits 1
+and 129, phone at bits 32 and 160. No clock change needed.
+
+SLIC side: ENHANCE bit 0 plus the wideband HPF values (RAM 531-539 and 658-666) from the
+ProSLIC PCM setup. Tones and FSK caller ID don't change.
+
+The bridge ioctl takes bit 30 for wideband. It turns on slots 8-10 as well and handles each
+half frame on its own. Twice the words go through, so the TX high mark is 288 instead of 192
+(384 would overflow the FIFO).
+
 ## SLIC settings
 
 Stock driver is ProSLIC API 9.2.0, LCUB setup. I kept the stock general config.
@@ -88,7 +104,10 @@ u32  ram_data[m]
 ## Modem
 
 - AT+QDAI sets the PCM mode. Factory is x,0,0,4,0,0,1,1 (master). It needs x,1,0,4,0,0,1,1
-  (slave), then AT+CFUN=1,1. Yes the first field is a literal x.
+  (slave), then AT+CFUN=1,1. Yes the first field is a literal x. The sixth field is the
+  sample rate (0 = 8 kHz, 1 = 16 kHz), fxsd sets it from the `hd` option.
+- After AT+CFUN=1,1 the modem is back on USB in about 14 s. AT+CLVL and AT+QRXGAIN are set
+  again by fxsd on every start.
 - ttyUSB2 is held by QModem's at-daemon, so everything goes through ubus.
 - No RING or +CLIP on any port, so fxsd polls AT+CLCC.
 - Use AT+CHUP to hang up. ATH kills data calls too.

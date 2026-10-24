@@ -241,6 +241,32 @@ int si_pcm_setup(struct slic *s, uint8_t ch, unsigned tx, unsigned rx)
 	return 0;
 }
 
+static const uint32_t rx_hpf_wb[9] = {
+	0x7CFF900, 0x18300700, 0x79FF201, 0x7CEDA1D, 0x106320D4, 0x7CEDA1D, 0xF9A910F,
+	0x185FFDA8, 0x08000000,
+};
+
+static const uint32_t tx_hpf_wb[9] = {
+	0x0C7FF4CE, 0x13800B32, 0x079FF201, 0x030FDD10, 0x19E0996C, 0x030FDD10, 0x0F9A910F,
+	0x185FFDA8, 0x0CD30000,
+};
+
+int si_pcm_wideband(struct slic *s, uint8_t ch)
+{
+	unsigned i;
+	uint8_t v;
+	int e;
+
+	for (i = 0; i < 9; i++)
+		WRRAM(658 + i, rx_hpf_wb[i]);
+	for (i = 0; i < 9; i++)
+		WRRAM(531 + i, tx_hpf_wb[i]);
+	if ((e = s->rd(s->ctx, ch, SI_ENHANCE, &v)))
+		return e;
+	WR(SI_ENHANCE, v | 1);
+	return 0;
+}
+
 int si_pcm_stop(struct slic *s, uint8_t ch)
 {
 	uint8_t v;

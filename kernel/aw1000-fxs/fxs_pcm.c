@@ -13,6 +13,7 @@ enum { P_TLMM = 16, P_BITMAP = 20, P_CTRL, P_OFFSET, P_DIV, P_INTEN, P_TH };
 #define PCM_CTRL_BASE	((1 << 24) | (2 << 0))
 #define BR_PRIME	24
 #define BR_HIGH		192
+#define BR_HIGH_WB	288
 #define BR_ERR		0x6
 
 static uint pcm_offset;
@@ -145,12 +146,14 @@ int fxs_pcm_capture(struct fxs_dev *d, u32 bitmap, u32 ms, u16 *w, u32 *n)
 
 static void br_sync(struct fxs_dev *d)
 {
-	int i, j;
+	u32 m = BIT(d->br_words) - 1;
+	int i, h, j;
 
-	pcm_hw_setup(d, PCM_CTRL_BASE | PCM_CTRL_CPU, BIT(d->br_words) - 1);
+	pcm_hw_setup(d, PCM_CTRL_BASE | PCM_CTRL_CPU, d->br_wb ? m | (m << 8) : m);
 	for (i = 0; i < BR_PRIME; i++)
-		for (j = 0; j < d->br_words; j++)
-			writel((j << 16) | 0xffff, d->pcm + PCM_TX16);
+		for (h = 0; h <= d->br_wb; h++)
+			for (j = 0; j < d->br_words; j++)
+				writel(((j + 8 * h) << 16) | 0xffff, d->pcm + PCM_TX16);
 	writel(1, d->pcm + PCM_START);
 	writel(BR_ERR, d->pcm + PCM_INT_STATUS);
 }
@@ -171,6 +174,7 @@ static int br_thread(void *arg)
 {
 	struct fxs_dev *d = arg;
 	unsigned int k = d->br_words, bits = 16 * k;
+	u32 high = d->br_wb ? BR_HIGH_WB : BR_HIGH;
 	u16 cur[4] = { 0 };
 	u32 have = 0;
 
@@ -187,14 +191,18 @@ static int br_thread(void *arg)
 			writel(st & BR_ERR, d->pcm + PCM_INT_STATUS);
 		}
 		cnt = readl(d->pcm + PCM_FIFO_CNT);
-		rx = min_t(u32, (cnt >> 9) & 0x1ff, BR_HIGH);
+		rx = min_t(u32, (cnt >> 9) & 0x1ff, high);
 		tx = cnt & 0x1ff;
 		for (i = 0; i < rx; i++) {
 			u32 w = readl(d->pcm + PCM_RX16);
-			u32 t = (w >> 16) & 0x1f;
+			u32 t = (w >> 16) & 0x1f, hb = 0;
 			u64 in = 0, out = GENMASK_ULL(bits - 1, 0);
 			u16 a, b;
 
+			if (d->br_wb && t >= 8) {
+				hb = 8;
+				t -= 8;
+			}
 			if (t >= k)
 				continue;
 			if (t == 0)
@@ -204,7 +212,7 @@ static int br_thread(void *arg)
 			if (t != k - 1 || have != BIT(k) - 1)
 				continue;
 			have = 0;
-			if (tx + k > BR_HIGH)
+			if (tx + k > high)
 				continue;
 			for (j = 0; j < k; j++)
 				in = (in << 16) | cur[j];
@@ -215,7 +223,7 @@ static int br_thread(void *arg)
 			out = br_put(out, bits, d->br_ao, b);
 			out = br_put(out, bits, d->br_bo, a);
 			for (j = 0; j < k; j++)
-				writel((j << 16) | ((out >> (16 * (k - 1 - j))) & 0xffff),
+				writel(((j + hb) << 16) | ((out >> (16 * (k - 1 - j))) & 0xffff),
 				       d->pcm + PCM_TX16);
 			tx += k;
 			d->br_moved++;
@@ -244,6 +252,7 @@ int fxs_pcm_bridge(struct fxs_dev *d, u32 arg)
 	d->br_bi = bi;
 	d->br_bo = bo;
 	d->br_words = (max(max(ai, ao), max(bi, bo)) + 15) / 16 + 1;
+	d->br_wb = !!(arg & BIT(30));
 	d->br_moved = d->br_resync = d->br_ticks = d->br_status = 0;
 	br_sync(d);
 	d->br_task = kthread_run(br_thread, d, "fxs-bridge");

@@ -34,7 +34,7 @@ struct fxs_dev {
 
 	struct task_struct *br_task;
 	u32 br_moved, br_resync, br_ticks, br_status, br_peak_a, br_peak_b;
-	u8 br_ai, br_ao, br_bi, br_bo, br_words;
+	u8 br_ai, br_ao, br_bi, br_bo, br_words, br_wb;
 
 	u32 save[32];
 	bool clk_on, pll_on, adss_on, pcm_on, pins_on, spi_on, spi_drv_set;

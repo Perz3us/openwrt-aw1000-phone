@@ -38,6 +38,11 @@ return view.extend({
 		o.default = '1';
 		o.rmempty = false;
 
+		o = s.taboption('general', form.Flag, 'hd', _('HD calling'),
+			_('Wideband (16 kHz) audio to the phone when the network and the other side support it. Changing this restarts the modem, so mobile data drops for about 30 seconds.'));
+		o.default = '0';
+		o.rmempty = false;
+
 		o = s.taboption('general', form.ListValue, 'callerid', _('Caller ID'),
 			_('Sends the caller\'s number to phones with a display. If your phone shows nothing, try another format or timing.'));
 		o.value('bellcore', _('FSK (Bellcore)'));

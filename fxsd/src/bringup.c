@@ -102,3 +102,24 @@ int qdai_is_slave(const char *resp)
 		return -1;
 	return mode == 1;
 }
+
+int qdai_rate(const char *resp)
+{
+	const char *q = strstr(resp, "+QDAI:");
+	char *end;
+	long rate;
+	int i;
+
+	if (!q)
+		return -1;
+	for (i = 0; i < 5; i++) {
+		end = strpbrk(q, ",\n");
+		if (!end || *end != ',')
+			return -1;
+		q = end + 1;
+	}
+	rate = strtol(q, &end, 10);
+	if (end == q || rate < 0 || rate > 1)
+		return -1;
+	return rate;
+}

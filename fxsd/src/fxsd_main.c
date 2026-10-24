@@ -38,7 +38,7 @@ struct fxsd {
 	struct slic s;
 	struct line line;
 	uint8_t ch;
-	int ringing, audio, verbose;
+	int ringing, audio, verbose, wb;
 	int cid_mode, cid_pending, cid_before, test_ring;
 	int32_t vbat_mv, vline_mv, iloop_ua;
 	unsigned long t_ring_arm, t_gap, t_meas, t_test;
@@ -244,7 +244,8 @@ static void op_audio(void *c, int on)
 
 	if (on == d->audio)
 		return;
-	if (fxsdev_bridge(&d->s, on ? (1u | (0u << 8) | (32u << 16) | (32u << 24) | 0x80000000u) : 0))
+	if (fxsdev_bridge(&d->s, on ? (1u | (0u << 8) | (32u << 16) | (32u << 24) | 0x80000000u |
+				       (d->wb ? 0x40000000u : 0)) : 0))
 		msg(LOG_ERR, "audio bridge %s failed", on ? "start" : "stop");
 	d->audio = on;
 }
@@ -420,9 +421,9 @@ static void write_state(struct fxsd *d)
 
 	if (!f)
 		return;
-	fprintf(f, "state=%s\npeer=%s\noffhook=%d\nvbat=%d\nvline=%d\niloop=%d\nown=%s\ntest=%d\nvoiceoff=%d\nsince=%ld\n",
+	fprintf(f, "state=%s\npeer=%s\noffhook=%d\nvbat=%d\nvline=%d\niloop=%d\nown=%s\ntest=%d\nvoiceoff=%d\nsince=%ld\nhd=%d\n",
 		line_state_name(d->line.state), d->line.peer, d->line.offhook,
-		d->vbat_mv, d->vline_mv, d->iloop_ua, own_number, d->test_ring, voice_off, d->talk_since);
+		d->vbat_mv, d->vline_mv, d->iloop_ua, own_number, d->test_ring, voice_off, d->talk_since, d->wb);
 	fclose(f);
 	rename(STATE_FILE ".tmp", STATE_FILE);
 }
@@ -518,6 +519,30 @@ static int wait_modem(void)
 	return -1;
 }
 
+static int modem_rate(void)
+{
+	char r[512];
+
+	return modem_at("AT+QDAI?", r, sizeof(r)) ? -1 : qdai_rate(r);
+}
+
+static void switch_rate(int hd)
+{
+	struct clcc_call c[CLCC_MAX];
+	char r[1024], cmd[48];
+
+	while (!stop && !modem_at("AT+CLCC", r, sizeof(r)) && clcc_parse_all(r, c, CLCC_MAX) > 0)
+		sleep(5);
+	if (stop)
+		return;
+	msg(LOG_INFO, "setting modem audio to %s kHz and restarting the modem", hd ? "16" : "8");
+	put_state("modem_restart", "", 0);
+	snprintf(cmd, sizeof(cmd), "AT+QDAI=x,1,0,4,0,%d,1,1", hd);
+	at(cmd);
+	at("AT+CFUN=1,1");
+	sleep(10);
+}
+
 static void check_hook(struct fxsd *d, unsigned long now)
 {
 	uint8_t lcr;
@@ -610,6 +635,7 @@ static int setup(struct fxsd *d, const struct si_patch *p, int gtx, int grx)
 	    (e = si_zsynth_setup(&d->s, d->ch, &imp)) ||
 	    (e = si_ring_setup(&d->s, d->ch, &aw1000_ring, &aw1000_gen_cfg)) ||
 	    (e = si_pcm_setup(&d->s, d->ch, 31, 32)) ||
+	    (d->wb && (e = si_pcm_wideband(&d->s, d->ch))) ||
 	    (e = si_irq_enable(&d->s, d->ch, &aw1000_gen_cfg)))
 		return e;
 	return fxsdev_ack(&d->s);
@@ -617,7 +643,7 @@ static int setup(struct fxsd *d, const struct si_patch *p, int gtx, int grx)
 
 static int usage(void)
 {
-	fprintf(stderr, "usage: fxsd -p PATCH [-c CHANNEL] [-g TXDB,RXDB] [-a ATPORT] [-l VOLUME] [-r RXGAIN] [-e LED] [-m READY,RINGING,OFFHOOK] [-b 0|1] [-i bellcore|etsi|dtmf|off] [-t before|after] [-k DAYS] [-f] [-v]\n");
+	fprintf(stderr, "usage: fxsd -p PATCH [-c CHANNEL] [-g TXDB,RXDB] [-a ATPORT] [-l VOLUME] [-r RXGAIN] [-e LED] [-m READY,RINGING,OFFHOOK] [-b 0|1] [-i bellcore|etsi|dtmf|off] [-t before|after] [-k DAYS] [-w 0|1] [-f] [-v]\n");
 	return 2;
 }
 
@@ -629,11 +655,11 @@ int main(int argc, char **argv)
 	unsigned long t_modem = 0, t_hook = 0, t_ready, t_prune;
 	int guard = 1;
 	enum line_state last = LS_BUSY + 1;
-	int gtx = -6, grx = 0, fg = 0, vol = -1, rxg = -1, o, e;
-	int ringback = 1;
+	int gtx = -6, grx = 0, fg = 0, vol = -1, rxg = -1, o, e, q;
+	int ringback = 1, hd = 0;
 	char r[512];
 
-	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:fv")) != -1) {
+	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:fv")) != -1) {
 		switch (o) {
 		case 'p': patch = optarg; break;
 		case 'c': d.ch = atoi(optarg) & 1; break;
@@ -647,6 +673,7 @@ int main(int argc, char **argv)
 		case 'i': d.cid_mode = cid_mode_parse(optarg); break;
 		case 't': d.cid_before = !strcmp(optarg, "before"); break;
 		case 'k': keep_days = atoi(optarg); break;
+		case 'w': hd = atoi(optarg) == 1; break;
 		case 'f': fg = 1; break;
 		case 'v': d.verbose = 1; break;
 		default: return usage();
@@ -667,6 +694,17 @@ int main(int argc, char **argv)
 		unlink(STATE_FILE);
 		return 0;
 	}
+	if ((q = modem_rate()) >= 0 && q != hd) {
+		switch_rate(hd);
+		if (wait_modem()) {
+			unlink(STATE_FILE);
+			return 0;
+		}
+		q = modem_rate();
+	}
+	d.wb = q == 1;
+	if (q >= 0 && d.wb != hd)
+		msg(LOG_WARNING, "modem audio is still %s kHz, could not change it", d.wb ? "16" : "8");
 	read_own_number();
 	check_voice();
 	if (vol >= 0 && vol <= 5) {

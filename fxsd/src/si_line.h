@@ -49,6 +49,7 @@ int si_irq_enable(struct slic *s, uint8_t ch, const struct si_gen_cfg *c);
 int si_irq_read(struct slic *s, uint8_t ch, uint8_t irq[4]);
 int si_dtmf_digit(struct slic *s, uint8_t ch, char *d);
 int si_pcm_setup(struct slic *s, uint8_t ch, unsigned tx_count, unsigned rx_count);
+int si_pcm_wideband(struct slic *s, uint8_t ch);
 int si_pcm_stop(struct slic *s, uint8_t ch);
 
 #endif
