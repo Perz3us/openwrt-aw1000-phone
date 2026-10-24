@@ -142,13 +142,31 @@ case it was the cause. Run `/etc/init.d/fxsd clear_guard` or press the button in
 ## Problems
 
 Calls fail straight away and the log shows `call failed`: check that the modem has voice calls
-turned on. Some modems come with `call_control` set to `1,1`, which blocks all calls. fxsd
-warns about this in the log and on the Status page.
+turned on. Some modems come with `call_control` set to `1,1`, which blocks all calls. The modem
+then answers every `ATD` with `NO CARRIER` in about 10 ms and `AT+CEER` gives no cause. fxsd
+warns about this in the log and on the Status page. Set it to `0,0`, it is saved in the modem:
 
 ```
 ubus call at-daemon sendat '{"at_port":"/dev/ttyUSB2","at_cmd":"AT+QCFG=\"call_control\"","timeout":3}'
 ubus call at-daemon sendat '{"at_port":"/dev/ttyUSB2","at_cmd":"AT+QCFG=\"call_control\",0,0","timeout":3}'
 ```
+
+If calls still fail, restart the modem with `AT+CFUN=1,1`. Two `+CLCC` entries with no number
+are normal on this firmware and fxsd ignores them.
+
+VoLTE never registers (`AT+QCFG="ims"` shows `1,0`) even though the SIM does VoLTE in a phone:
+check `sms_only` in the modem settings. Some units, like one that came from Australia, have it
+set to `01`. The modem then tells the network it only wants data and SMS, so it never starts
+VoLTE. A firmware flash does not reset it. Set it to `00`:
+
+```
+ubus call at-daemon sendat '{"at_port":"/dev/ttyUSB2","at_cmd":"AT+QNVFR=\"/nv/item_files/modem/mmode/sms_only\"","timeout":3}'
+ubus call at-daemon sendat '{"at_port":"/dev/ttyUSB2","at_cmd":"AT+QNVFW=\"/nv/item_files/modem/mmode/sms_only\",00","timeout":3}'
+ubus call at-daemon sendat '{"at_port":"/dev/ttyUSB2","at_cmd":"AT+CFUN=1,1","timeout":3}'
+```
+
+The modem restart moves the AT port off `ttyUSB2`, so reboot the router afterwards. After the
+reboot `AT+QCFG="ims"` should show `1,1`.
 
 On official OpenWrt, ModemManager also reads the modem AT port and takes the answers meant for
 fxsd. Stop it or remove it if calls are not picked up.
