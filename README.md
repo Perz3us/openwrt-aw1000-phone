@@ -55,10 +55,10 @@ there with scp) and install them:
 
 ```
 cd /tmp
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.4.0/kmod-aw1000-fxs-6.12.94.0.2.0-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.4.0/fxsd-0.4.0-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.4.0/luci-app-fxs-0.4.0-r1.apk
-apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.2.0-r1.apk /tmp/fxsd-0.4.0-r1.apk /tmp/luci-app-fxs-0.4.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.4.1/kmod-aw1000-fxs-6.12.94.0.2.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.4.1/fxsd-0.4.1-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.4.1/luci-app-fxs-0.4.1-r1.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.2.0-r1.apk /tmp/fxsd-0.4.1-r1.apk /tmp/luci-app-fxs-0.4.1-r1.apk
 ```
 
 When updating, always update all three together (HD calling needs the 0.2.0 driver). The old
@@ -67,7 +67,7 @@ kernel module stays loaded until it is removed, so stop fxsd and remove it befor
 ```
 /etc/init.d/fxsd stop
 rmmod aw1000_fxs
-apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.2.0-r1.apk /tmp/fxsd-0.4.0-r1.apk /tmp/luci-app-fxs-0.4.0-r1.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.2.0-r1.apk /tmp/fxsd-0.4.1-r1.apk /tmp/luci-app-fxs-0.4.1-r1.apk
 /etc/init.d/fxsd start
 ```
 
@@ -117,7 +117,7 @@ Call history, Settings, Speed dial and Blocked numbers. The same settings are in
 | `volume` | `5` | modem speaker volume (`AT+CLVL`) |
 | `modem_rx_gain` | `8192` | modem `AT+QRXGAIN` |
 | `channel` | `1` | SLIC channel, leave it at 1 |
-| `at_port` | `/dev/ttyUSB2` | modem AT port |
+| `at_port` | `auto` | modem AT port, `auto` finds it by itself |
 | `patch` | `/etc/fxs/si3226x_patch.bin` | patch file |
 | `ringback` | `1` | ringing tone while the other side rings |
 | `hd` | `0` | HD calling (16 kHz). Changing it restarts the modem, mobile data drops for about 30 seconds |

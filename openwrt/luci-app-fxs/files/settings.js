@@ -95,7 +95,10 @@ return view.extend({
 		o.value('1');
 		o.value('0');
 
-		o = s.taboption('advanced', form.Value, 'at_port', _('Modem AT port'));
+		o = s.taboption('advanced', form.Value, 'at_port', _('Modem AT port'),
+			_('auto finds the modem AT port by itself, also when the port names change after a modem restart.'));
+		o.value('auto');
+		o.placeholder = 'auto';
 
 		o = s.taboption('advanced', form.Value, 'patch', _('SLIC patch file'));
 

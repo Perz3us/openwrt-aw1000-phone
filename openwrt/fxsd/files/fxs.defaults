@@ -1,0 +1,7 @@
+#!/bin/sh
+
+[ "$(uci -q get fxs.main.at_port)" = "/dev/ttyUSB2" ] && {
+	uci set fxs.main.at_port='auto'
+	uci commit fxs
+}
+exit 0

@@ -502,12 +502,19 @@ static void switch_rate(int hd);
 static int wait_modem(int hd)
 {
 	char r[512];
-	int last = 2, q, tried = 0;
+	int last = 2, q, tried = 0, fails = 0;
 
 	while (!stop) {
 		q = modem_at("AT+QDAI?", r, sizeof(r)) ? -1 : qdai_is_slave(r);
 		if (q == 1)
 			return 0;
+		if (q < 0 && modem_port_ok() && ++fails >= 10) {
+			msg(LOG_WARNING, "at-daemon does not answer, restarting it");
+			modem_heal();
+			fails = -10;
+		} else if (q >= 0) {
+			fails = 0;
+		}
 		if (q == 0 && !tried) {
 			msg(LOG_INFO, "modem PCM is in master mode, switching it to slave");
 			tried = 1;
@@ -547,8 +554,8 @@ static void switch_rate(int hd)
 	put_state("modem_restart", "", 0);
 	snprintf(cmd, sizeof(cmd), "AT+QDAI=x,1,0,4,0,%d,1,1", hd);
 	at(cmd);
-	at("AT+CFUN=1,1");
-	sleep(10);
+	if (modem_restart())
+		msg(LOG_WARNING, "modem did not come back after the restart");
 }
 
 static void check_hook(struct fxsd *d, unsigned long now)
@@ -736,7 +743,7 @@ int main(int argc, char **argv)
 	ops.ctx = &d;
 	line_init(&d.line, &ops);
 	d.line.ringback = ringback;
-	msg(LOG_INFO, "ready on channel %u", d.ch);
+	msg(LOG_INFO, "ready on channel %u, modem AT port %s", d.ch, modem_port());
 	trim_log();
 	led_update(led_want(&d), 0);
 	t_ready = now_ms();
