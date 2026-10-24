@@ -497,15 +497,23 @@ static void check_voice(void)
 		msg(LOG_WARNING, "voice calls are turned off in the modem; run AT+QCFG=\"call_control\",0,0 and restart the modem");
 }
 
-static int wait_modem(void)
+static void switch_rate(int hd);
+
+static int wait_modem(int hd)
 {
 	char r[512];
-	int last = 2, q;
+	int last = 2, q, tried = 0;
 
 	while (!stop) {
 		q = modem_at("AT+QDAI?", r, sizeof(r)) ? -1 : qdai_is_slave(r);
 		if (q == 1)
 			return 0;
+		if (q == 0 && !tried) {
+			msg(LOG_INFO, "modem PCM is in master mode, switching it to slave");
+			tried = 1;
+			switch_rate(hd);
+			continue;
+		}
 		if (q != last) {
 			if (q == 0)
 				msg(LOG_ERR, "modem PCM is in master mode; set it to slave (AT+QDAI) and restart the modem");
@@ -690,13 +698,13 @@ int main(int argc, char **argv)
 	signal(SIGTERM, on_sig);
 	signal(SIGUSR1, on_usr1);
 	signal(SIGPIPE, SIG_IGN);
-	if (wait_modem()) {
+	if (wait_modem(hd)) {
 		unlink(STATE_FILE);
 		return 0;
 	}
 	if ((q = modem_rate()) >= 0 && q != hd) {
 		switch_rate(hd);
-		if (wait_modem()) {
+		if (wait_modem(hd)) {
 			unlink(STATE_FILE);
 			return 0;
 		}

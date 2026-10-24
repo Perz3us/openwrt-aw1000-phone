@@ -73,8 +73,9 @@ apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.2.0-r1.apk /tmp/fxsd-0.
 
 Rebooting the router after installing does the same. Then reload LuCI with Ctrl+F5.
 
-Put the modem audio interface in slave mode. You only do this once, the modem remembers it.
-The modem restarts, so the internet drops for a minute.
+The modem audio interface has to be in slave mode. fxsd checks this when it starts and sets it
+if needed, then restarts the modem, so the internet drops for a minute the first time. The
+modem remembers it. To set it by hand instead:
 
 ```
 ubus call at-daemon sendat '{"at_port":"/dev/ttyUSB2","at_cmd":"AT+QDAI=x,1,0,4,0,0,1,1","timeout":3}'
@@ -171,8 +172,8 @@ reboot `AT+QCFG="ims"` should show `1,1`.
 On official OpenWrt, ModemManager also reads the modem AT port and takes the answers meant for
 fxsd. Stop it or remove it if calls are not picked up.
 
-The phone does not ring or LuCI says "Modem audio not set to slave mode": run the `AT+QDAI`
-step from Install again and restart the modem.
+The phone does not ring or LuCI says "Modem audio not set to slave mode": fxsd tried to set it
+and the modem did not keep it. Run the `AT+QDAI` step from Install by hand and restart the modem.
 
 Calls sound harsh or buzzy with HD calling on: the kernel driver is older than 0.2.0. Install
 the kmod package from the same release, or turn HD calling off.
