@@ -55,7 +55,8 @@ start_service() {
 	config_get history_days main history_days 30
 	[ "$history_autodelete" = 1 ] || history_days=0
 
-	if [ -f "$GUARD" ] && [ "$(cut -d. -f1 /proc/uptime)" -lt 300 ]; then
+	if [ -f "$GUARD" ] && [ "$(cat "$GUARD")" != "$(cat /proc/sys/kernel/random/boot_id)" ] &&
+	   [ "$(cut -d. -f1 /proc/uptime)" -lt 300 ]; then
 		logger -t fxsd "previous start did not finish (router restarted), not starting; run '/etc/init.d/fxsd clear_guard' to retry"
 		return 0
 	fi
@@ -72,7 +73,7 @@ start_service() {
 	[ "$block_private" = 1 ] && echo private >> /var/run/fxsd.block
 
 	mkdir -p /etc/fxs
-	touch "$GUARD"
+	cat /proc/sys/kernel/random/boot_id > "$GUARD"
 	sync
 	grep -q '^aw1000_fxs ' /proc/modules || insmod aw1000-fxs || {
 		logger -t fxsd "kernel module failed to load"

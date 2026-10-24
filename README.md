@@ -54,10 +54,10 @@ there with scp) and install them:
 
 ```
 cd /tmp
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.3.1/kmod-aw1000-fxs-6.12.94.0.1.0-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.3.1/fxsd-0.3.1-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.3.1/luci-app-fxs-0.3.1-r1.apk
-apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.1.0-r1.apk /tmp/fxsd-0.3.1-r1.apk /tmp/luci-app-fxs-0.3.1-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.3.2/kmod-aw1000-fxs-6.12.94.0.1.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.3.2/fxsd-0.3.2-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.3.2/luci-app-fxs-0.3.2-r1.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.1.0-r1.apk /tmp/fxsd-0.3.2-r1.apk /tmp/luci-app-fxs-0.3.2-r1.apk
 ```
 
 When updating, run `/etc/init.d/fxsd restart` afterwards and reload LuCI with Ctrl+F5.
