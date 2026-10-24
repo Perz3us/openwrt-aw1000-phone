@@ -61,8 +61,17 @@ wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.4.0/lu
 apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.2.0-r1.apk /tmp/fxsd-0.4.0-r1.apk /tmp/luci-app-fxs-0.4.0-r1.apk
 ```
 
-When updating, always update all three together (HD calling needs the 0.2.0 driver), then run
-`/etc/init.d/fxsd restart` and reload LuCI with Ctrl+F5.
+When updating, always update all three together (HD calling needs the 0.2.0 driver). The old
+kernel module stays loaded until it is removed, so stop fxsd and remove it before installing:
+
+```
+/etc/init.d/fxsd stop
+rmmod aw1000_fxs
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.2.0-r1.apk /tmp/fxsd-0.4.0-r1.apk /tmp/luci-app-fxs-0.4.0-r1.apk
+/etc/init.d/fxsd start
+```
+
+Rebooting the router after installing does the same. Then reload LuCI with Ctrl+F5.
 
 Put the modem audio interface in slave mode. You only do this once, the modem remembers it.
 The modem restarts, so the internet drops for a minute.
