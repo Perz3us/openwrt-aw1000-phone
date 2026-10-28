@@ -15,6 +15,7 @@ int fxsdev_ack(struct slic *s);
 int fxsdev_capture(struct slic *s, uint32_t bitmap, uint32_t ms, uint16_t *w, uint32_t *n);
 int fxsdev_bridge(struct slic *s, uint32_t arg);
 int fxsdev_stat(struct slic *s, uint32_t st[6]);
+int fxsdev_austat(struct slic *s, uint32_t st[4]);
 int fxsdev_pcm_rd(struct slic *s, uint32_t off, uint32_t *v);
 int fxsdev_pcm_wr(struct slic *s, uint32_t off, uint32_t v);
 

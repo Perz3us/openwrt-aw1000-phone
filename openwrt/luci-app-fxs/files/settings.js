@@ -43,6 +43,13 @@ return view.extend({
 		o.default = '0';
 		o.rmempty = false;
 
+		o = s.taboption('general', form.Flag, 'sip', _('SIP calling (experimental)'),
+			_('Lets SIP phones and apps make and answer calls through the SIM, next to the RJ11 phone. It needs QModem voice (qmodem-voip and qmodem-sipd, with at-daemon 3.4.0 or newer) set up and turned on in QModem. Until QModem voice is running, the RJ11 phone keeps working as before.') + '<br /><strong>' +
+			_('Warning: this is still being tested. Calls may drop or have no sound, and call waiting (flash) on the RJ11 phone does not work while it is on. If something goes wrong, turn it off and report it on') +
+			' <a href="https://github.com/Perz3us/openwrt-aw1000-phone/issues" target="_blank" rel="noreferrer">GitHub</a>.</strong>');
+		o.default = '0';
+		o.rmempty = false;
+
 		o = s.taboption('general', form.ListValue, 'callerid', _('Caller ID'),
 			_('Sends the caller\'s number to phones with a display. If your phone shows nothing, try another format or timing.'));
 		o.value('bellcore', _('FSK (Bellcore)'));
@@ -57,6 +64,24 @@ return view.extend({
 		o.value('before', _('Before the first ring'));
 		o.default = 'after';
 		o.depends({ callerid: 'off', '!reverse': true });
+
+		o = s.taboption('general', form.ListValue, 'ring_pattern', _('Ring pattern'),
+			_('How the phone rings for an incoming call. Use Ring the phone on the Status page to try it.'));
+		o.value('standard', _('Standard (2 s ring, 4 s pause)'));
+		o.value('short', _('Short (1 s ring, 4 s pause)'));
+		o.value('double', _('Double ring (UK and Australia)'));
+		o.value('custom', _('Custom'));
+		o.default = 'standard';
+
+		o = s.taboption('general', form.Value, 'ring_on', _('Ring time (ms)'));
+		o.datatype = 'range(200,8000)';
+		o.placeholder = '2000';
+		o.depends('ring_pattern', 'custom');
+
+		o = s.taboption('general', form.Value, 'ring_off', _('Pause time (ms)'));
+		o.datatype = 'range(200,8000)';
+		o.placeholder = '4000';
+		o.depends('ring_pattern', 'custom');
 
 		o = s.taboption('history', form.Flag, 'history_autodelete', _('Delete old calls'),
 			_('Remove calls from the call history once they are older than the number of days below.'));

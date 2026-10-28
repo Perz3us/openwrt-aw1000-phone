@@ -170,11 +170,82 @@ static u64 br_put(u64 f, unsigned int bits, unsigned int pos, u16 v)
 	return (f & ~(0xffffULL << sh)) | ((u64)v << sh);
 }
 
+#define AU_MASK		(FXS_AU_RING - 1)
+
+u32 fxs_au_period(struct fxs_dev *d)
+{
+	return 160 << d->br_wb;
+}
+
+u32 fxs_au_avail(struct fxs_dev *d)
+{
+	u32 n;
+
+	spin_lock(&d->au_lock);
+	n = d->au_rx_head - d->au_rx_tail;
+	spin_unlock(&d->au_lock);
+	return n;
+}
+
+u32 fxs_au_read(struct fxs_dev *d, u32 *buf, u32 max)
+{
+	u32 n = 0;
+
+	spin_lock(&d->au_lock);
+	while (n < max && d->au_rx_tail != d->au_rx_head)
+		buf[n++] = d->au_rx[d->au_rx_tail++ & AU_MASK];
+	spin_unlock(&d->au_lock);
+	return n;
+}
+
+void fxs_au_write(struct fxs_dev *d, const u32 *buf, u32 n)
+{
+	u32 i;
+
+	spin_lock(&d->au_lock);
+	for (i = 0; i < n; i++) {
+		if (d->au_tx_head - d->au_tx_tail == FXS_AU_RING) {
+			d->au_drop += n - i;
+			break;
+		}
+		d->au_tx[d->au_tx_head++ & AU_MASK] = buf[i];
+	}
+	spin_unlock(&d->au_lock);
+}
+
+static u32 au_swap(struct fxs_dev *d, u16 a, u16 b, u32 *ready)
+{
+	u32 o = 0;
+
+	spin_lock(&d->au_lock);
+	if (d->au_rx_head - d->au_rx_tail == FXS_AU_RING) {
+		d->au_rx_tail++;
+		d->au_over++;
+	}
+	d->au_rx[d->au_rx_head++ & AU_MASK] = a | (u32)b << 16;
+	if (d->au_tx_tail != d->au_tx_head)
+		o = d->au_tx[d->au_tx_tail++ & AU_MASK];
+	else
+		d->au_under++;
+	*ready = d->au_rx_head - d->au_rx_tail;
+	spin_unlock(&d->au_lock);
+	return o;
+}
+
+static void au_reset(struct fxs_dev *d)
+{
+	spin_lock(&d->au_lock);
+	d->au_rx_head = d->au_rx_tail = d->au_tx_head = d->au_tx_tail = 0;
+	d->au_under = d->au_over = d->au_drop = 0;
+	spin_unlock(&d->au_lock);
+}
+
 static int br_thread(void *arg)
 {
 	struct fxs_dev *d = arg;
 	unsigned int k = d->br_words, bits = 16 * k;
 	u32 high = d->br_wb ? BR_HIGH_WB : BR_HIGH;
+	u32 period = fxs_au_period(d);
 	u16 cur[4] = { 0 };
 	u32 have = 0;
 
@@ -220,6 +291,14 @@ static int br_thread(void *arg)
 			b = br_get(in, bits, d->br_bi);
 			d->br_peak_a = max_t(u32, d->br_peak_a, abs((s16)a));
 			d->br_peak_b = max_t(u32, d->br_peak_b, abs((s16)b));
+			if (d->br_user) {
+				u32 ready, o = au_swap(d, a, b, &ready);
+
+				if (ready >= period)
+					wake_up_interruptible(&d->auq);
+				a = o >> 16;
+				b = o & 0xffff;
+			}
 			out = br_put(out, bits, d->br_ao, b);
 			out = br_put(out, bits, d->br_bo, a);
 			for (j = 0; j < k; j++)
@@ -243,6 +322,8 @@ int fxs_pcm_bridge(struct fxs_dev *d, u32 arg)
 		if (d->pcm_on)
 			pcm_restore_idle(d);
 	}
+	WRITE_ONCE(d->br_user, 0);
+	wake_up_interruptible(&d->auq);
 	if (!(arg & BIT(31)))
 		return 0;
 	if (!d->pcm_on || max(max(ai, ao), max(bi, bo)) > 48)
@@ -253,6 +334,8 @@ int fxs_pcm_bridge(struct fxs_dev *d, u32 arg)
 	d->br_bo = bo;
 	d->br_words = (max(max(ai, ao), max(bi, bo)) + 15) / 16 + 1;
 	d->br_wb = !!(arg & BIT(30));
+	au_reset(d);
+	d->br_user = !!(arg & BIT(7));
 	d->br_moved = d->br_resync = d->br_ticks = d->br_status = 0;
 	br_sync(d);
 	d->br_task = kthread_run(br_thread, d, "fxs-bridge");

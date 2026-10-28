@@ -14,6 +14,7 @@
 #define QUECTEL_VID	"2c7c"
 #define AT_IFACE	2
 #define AT_DAEMON	"/etc/init.d/ubus-at-daemon"
+#define QMODEM_NET	"/etc/init.d/qmodem_network"
 
 static char at_port[64] = "auto";
 static char cur[64];
@@ -191,7 +192,31 @@ int modem_restart(void)
 	}
 	if (atd)
 		system(AT_DAEMON " start >/dev/null 2>&1");
+	modem_redial();
 	return i || !modem_port_ok() ? -1 : 0;
+}
+
+void modem_redial(void)
+{
+	if (access(QMODEM_NET, X_OK))
+		return;
+	system("for s in $(uci -q show qmodem | sed -n 's/^qmodem\\.\\([^.=]*\\)=modem-device$/\\1/p'); do "
+	       QMODEM_NET " redial \"$s\"; done >/dev/null 2>&1");
+}
+
+int modem_data_up(void)
+{
+	char line[256], dev[32];
+	unsigned long dst;
+	FILE *f = fopen("/proc/net/route", "r");
+	int up = 0;
+
+	if (!f)
+		return 0;
+	while (!up && fgets(line, sizeof(line), f))
+		up = sscanf(line, "%31s %lx", dev, &dst) == 2 && dst == 0 && strcmp(dev, "lo");
+	fclose(f);
+	return up;
 }
 
 int modem_at(const char *cmd, char *resp, size_t n)

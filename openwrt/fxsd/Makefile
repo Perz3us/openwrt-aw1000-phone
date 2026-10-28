@@ -4,7 +4,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=fxsd
-PKG_VERSION:=0.4.1
+PKG_VERSION:=0.5.0
 PKG_RELEASE:=1
 PKG_LICENSE:=GPL-2.0-only
 PKG_MAINTAINER:=perz3us
@@ -17,12 +17,13 @@ define Package/fxsd
   SECTION:=utils
   CATEGORY:=Utilities
   TITLE:=AW1000 RJ11 phone port daemon
-  DEPENDS:=+kmod-aw1000-fxs
+  DEPENDS:=+kmod-aw1000-fxs +libubus +libubox
 endef
 
 define Package/fxsd/description
   Runs the RJ11 phone port of the Arcadyan AW1000: SLIC bring-up, dial tone,
-  ringing, DTMF dialing and modem call control through at-daemon.
+  ringing, DTMF dialing and modem call control through at-daemon, with
+  optional SIP calling through QModem voice.
 endef
 
 define Package/fxsd/conffiles
@@ -38,7 +39,7 @@ endef
 
 define Build/Compile
 	$(MAKE) -C $(PKG_BUILD_DIR)/fxsd build/fxsd build/fxs-bringup \
-		CC="$(TARGET_CC)" CFLAGS="$(TARGET_CFLAGS)" WERROR=
+		CC="$(TARGET_CC)" CFLAGS="$(TARGET_CFLAGS) $(TARGET_CPPFLAGS)" LDFLAGS="$(TARGET_LDFLAGS)" WERROR=
 endef
 
 define Package/fxsd/install

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (C) 2026 perz3us
 #include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -187,10 +189,30 @@ static void txtest(struct slic *s, uint8_t ch)
 	s->wr(s->ctx, ch, 43, 0);
 }
 
+static void user_loop(int au, int ms)
+{
+	uint32_t buf[1024];
+	struct pollfd p = { .fd = au, .events = POLLIN };
+	ssize_t n;
+	int i;
+
+	for (; ms > 0 && !stop; ms -= 20) {
+		if (poll(&p, 1, 20) <= 0)
+			continue;
+		n = read(au, buf, sizeof(buf));
+		if (n <= 0)
+			continue;
+		for (i = 0; i < n / 4; i++)
+			buf[i] = (buf[i] >> 16) | (buf[i] << 16);
+		if (write(au, buf, n) != n)
+			fprintf(stderr, "audio write: %s\n", strerror(errno));
+	}
+}
+
 static int usage(void)
 {
 	fprintf(stderr, "usage: fxs-bringup --patch FILE [--power [--linefeed fwd [--ring SECONDS | --dialtone] [--pcm TXCOUNT,RXCOUNT]]]\n"
-		"       [--wb] [--capture BITMAP] [--bridge AIN,AOUT,BIN,BOUT] [--chan 0|1] [--hold SECONDS]\n");
+		"       [--wb] [--capture BITMAP] [--bridge AIN,AOUT,BIN,BOUT [--user]] [--chan 0|1] [--hold SECONDS]\n");
 	return 2;
 }
 
@@ -203,7 +225,7 @@ int main(int argc, char **argv)
 	int power = 0, hold = 0, fwd = 0, ring = 0, dial = 0, i, e, q;
 	int pcm_tx = -1, pcm_rx = -1, br_a = -1, br_b = -1, br_c = -1, br_d = -1;
 	unsigned mask = 3, cap = 0;
-	int txt = 0, wb = 0;
+	int txt = 0, wb = 0, user = 0, au = -1;
 	struct si_imp imp = aw1000_imp_600;
 	int gtx = 0, grx = 0;
 
@@ -226,6 +248,8 @@ int main(int argc, char **argv)
 			sscanf(argv[++i], "%d,%d", &gtx, &grx);
 		else if (!strcmp(argv[i], "--wb"))
 			wb = 1;
+		else if (!strcmp(argv[i], "--user"))
+			user = 1;
 		else if (!strcmp(argv[i], "--txtest"))
 			txt = 1;
 		else if (!strcmp(argv[i], "--capture") && i + 1 < argc)
@@ -241,7 +265,8 @@ int main(int argc, char **argv)
 		return usage();
 	imp.txgain_db = gtx;
 	imp.rxgain_db = grx;
-	if ((pcm_tx >= 0 && (!fwd || pcm_rx < 0)) || (br_a >= 0 && br_d < 0) || cap > 0xffff)
+	if ((pcm_tx >= 0 && (!fwd || pcm_rx < 0)) || (br_a >= 0 && br_d < 0) || cap > 0xffff ||
+	    (user && br_a < 0))
 		return usage();
 	if ((e = si_patch_load_file(patch_file, &p))) {
 		fprintf(stderr, "patch %s: %s\n", patch_file, strerror(-e));
@@ -317,11 +342,18 @@ int main(int argc, char **argv)
 		if (mask & (1u << i))
 			txtest(&s, i);
 	if (br_a >= 0) {
-		if ((e = fxsdev_bridge(&s, (br_a & 0x3f) | ((br_b & 0x3f) << 8) | ((br_c & 0x3f) << 16) | ((uint32_t)(br_d & 0x3f) << 24) | 0x80000000u | (wb ? 0x40000000u : 0)))) {
+		if ((e = fxsdev_bridge(&s, (br_a & 0x3f) | ((br_b & 0x3f) << 8) | ((br_c & 0x3f) << 16) | ((uint32_t)(br_d & 0x3f) << 24) | 0x80000000u | (wb ? 0x40000000u : 0) |
+					   (user ? 0x80u : 0)))) {
 			fprintf(stderr, "bridge failed: %s\n", strerror(-e));
 			goto out;
 		}
-		printf("bridge modem in %d out %d, phone in %d out %d\n", br_a, br_b, br_c, br_d);
+		printf("bridge modem in %d out %d, phone in %d out %d%s\n", br_a, br_b, br_c, br_d,
+		       user ? " through userspace" : "");
+		if (user && (au = open("/dev/fxs0audio", O_RDWR | O_CLOEXEC)) < 0) {
+			e = -errno;
+			fprintf(stderr, "/dev/fxs0audio: %s\n", strerror(errno));
+			goto out;
+		}
 	}
 	if (dial) {
 		dial_loop(&s, mask, hold);
@@ -330,7 +362,10 @@ int main(int argc, char **argv)
 	for (i = 0; i < hold && !stop; i++) {
 		int c;
 
-		sleep(1);
+		if (au >= 0)
+			user_loop(au, 1000);
+		else
+			sleep(1);
 		if (ring > 0 && i + 1 < ring)
 			fxsdev_ring_arm(&s, 3000);
 		for (c = 0; c < 2; c++) {
@@ -360,10 +395,15 @@ int main(int argc, char **argv)
 			if (!fxsdev_stat(&s, st))
 				printf("bridge moved %u resync %u ticks %u status 0x%x peak modem %u phone %u\n",
 				       st[0], st[1], st[2], st[3], st[4], st[5]);
+			if (au >= 0 && !fxsdev_austat(&s, st))
+				printf("userspace under %u over %u drop %u waiting %u\n",
+				       st[0], st[1], st[2], st[3]);
 		}
 		fflush(stdout);
 	}
 out:
+	if (au >= 0)
+		close(au);
 	if (br_a >= 0)
 		fxsdev_bridge(&s, 0);
 	if (ring)

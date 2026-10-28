@@ -11,6 +11,14 @@ static void enter(struct line *l, enum line_state s, unsigned long now)
 {
 	l->state = s;
 	l->t_state = now;
+	l->t_gone = ULONG_MAX;
+	l->released = 0;
+}
+
+void line_released(struct line *l)
+{
+	if (l->state == LS_TALKING)
+		l->released = 10;
 }
 
 static void note(struct line *l, const char *what, const char *num)
@@ -57,12 +65,14 @@ void line_init(struct line *l, const struct line_ops *ops)
 	l->ops = ops;
 	l->state = LS_IDLE;
 	l->t_hangup = ULONG_MAX;
+	l->t_gone = ULONG_MAX;
 	l->dialtone_ms = 15000;
 	l->digit_ms = 4000;
 	l->flash_min_ms = 80;
 	l->flash_ms = 700;
 	l->busy_ms = 60000;
 	l->setup_ms = 10000;
+	l->gone_ms = 3000;
 	l->ringback = 1;
 }
 
@@ -191,10 +201,20 @@ static void talking(struct line *l, const struct clcc_call *calls, int n, unsign
 	const struct clcc_call *waiting = find(calls, n, CLCC_WAITING);
 
 	if (!n) {
+		if (l->t_gone == ULONG_MAX)
+			l->t_gone = now;
+		if (!l->released && now - l->t_gone < l->gone_ms)
+			return;
+		l->t_gone = ULONG_MAX;
+		l->ops->hangup(l->ops->ctx);
+		l->t_hangup = now;
 		note(l, "ended", l->peer);
 		go_busy(l, now);
 		return;
 	}
+	l->t_gone = ULONG_MAX;
+	if (l->released)
+		l->released--;
 	if (n > 1 && active && strcmp(l->peer, active->number)) {
 		strcpy(l->peer, active->number);
 		note(l, "switched", l->peer);
@@ -250,7 +270,8 @@ void line_modem(struct line *l, const struct clcc_call *calls, int n, unsigned l
 	case LS_RINGING:
 		if (l->recall ? !find(calls, n, CLCC_HELD) && !active : !find_incoming(calls, n)) {
 			l->ops->ring(l->ops->ctx, 0);
-			note(l, l->recall ? "ended" : "missed", l->peer);
+			note(l, l->recall ? "ended" : l->ops->elsewhere && l->ops->elsewhere(l->ops->ctx) ?
+			     "elsewhere" : "missed", l->peer);
 			l->recall = 0;
 			enter(l, LS_IDLE, now);
 		}

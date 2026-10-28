@@ -9,6 +9,7 @@ var callStatus = rpc.declare({ object: 'fxs', method: 'status' });
 var callClearGuard = rpc.declare({ object: 'fxs', method: 'clear_guard' });
 var callSetEnabled = rpc.declare({ object: 'fxs', method: 'set_enabled', params: [ 'enabled' ] });
 var callRingTest = rpc.declare({ object: 'fxs', method: 'ring_test' });
+var callVersion = rpc.declare({ object: 'fxs', method: 'version' });
 
 var stateText = {
 	idle: _('Idle (on hook)'),
@@ -61,6 +62,7 @@ var css = '\
 @keyframes fxs-shake { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-4deg); } 75% { transform: rotate(4deg); } }\
 @keyframes fxs-wave { 0% { opacity: 0; } 40% { opacity: 1; } 100% { opacity: 0; } }\
 @keyframes fxs-pulse { 0%,100% { opacity: 0; } 50% { opacity: 1; } }\
+.fxs-footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid rgba(128,128,128,.25); text-align: center; font-size: 90%; opacity: .75; line-height: 1.7; }\
 ';
 
 var phoneSvg = '\
@@ -136,12 +138,19 @@ function statusRows(st) {
 		[ _('Line'), stateText[st.state] || st.state ],
 		[ _('My number'), st.own || _('unknown, set it in Settings') ],
 		[ _('Handset'), st.offhook ? _('off hook') : _('on hook') ],
-		[ _('Audio'), !st.running ? '-' : (st.hd ? _('HD (16 kHz)') : _('Normal (8 kHz)')) ],
+		[ _('Audio'), !st.running ? '-' : (st.hd ? _('HD (16 kHz)') : _('Normal (8 kHz)')) ]
+	];
+
+	if (st.running && st.sip)
+		rows.push([ _('SIP calling'), st.sip < 2 ? _('Waiting for QModem voice, the phone uses the modem directly') :
+			(st.sipcall ? _('On, a SIP phone is on a call') : _('On')) ]);
+
+	rows = rows.concat([
 		[ _('Number'), [ 'ringing', 'calling', 'talking' ].indexOf(st.state) >= 0 && st.peer ? st.peer : '-' ],
 		[ _('Service running'), yesno(st.running) ],
 		[ _('Kernel module loaded'), yesno(st.module) ],
 		[ _('SLIC patch present'), yesno(st.patch) ]
-	];
+	]);
 
 	return rows.map(function(r) {
 		return E('tr', { 'class': 'tr' }, [
@@ -168,7 +177,7 @@ function phoneState(st) {
 
 return view.extend({
 	load: function() {
-		return callStatus();
+		return Promise.all([ callStatus(), L.resolveDefault(callVersion(), {}) ]);
 	},
 
 	updatePhone: function(st) {
@@ -238,7 +247,9 @@ return view.extend({
 	},
 
 	render: function(data) {
-		var st = data || {};
+		var st = data[0] || {};
+		var ver = data[1] || {};
+		var verText = ver.fxsd ? _('Version %s, driver %s').format(ver.fxsd, ver.driver || '?') : '';
 
 		var statusTable = E('table', { 'class': 'table' }, statusRows(st));
 		var lineTable = E('table', { 'class': 'table' }, lineRows(st));
@@ -286,9 +297,19 @@ return view.extend({
 				lineTable,
 				E('div', { 'style': 'margin-top: 10px' }, this.ringBtn)
 			]),
-			E('div', { 'style': 'text-align: right; opacity: 0.6; font-size: 90%' }, [
-				E('a', { 'href': 'https://github.com/Perz3us/openwrt-aw1000-phone', 'target': '_blank', 'rel': 'noreferrer' },
-					'openwrt-aw1000-phone by perz3us')
+			E('div', { 'class': 'fxs-footer' }, [
+				E('div', {}, [
+					E('a', { 'href': 'https://github.com/Perz3us/openwrt-aw1000-phone', 'target': '_blank', 'rel': 'noreferrer' },
+						'openwrt-aw1000-phone'),
+					' by perz3us',
+					verText ? ' · ' + verText : ''
+				]),
+				E('div', {}, [
+					_('Open source and open to contributions. Found a bug or have an idea? '),
+					E('a', { 'href': 'https://github.com/Perz3us/openwrt-aw1000-phone/issues', 'target': '_blank', 'rel': 'noreferrer' },
+						_('Open an issue')),
+					_(' or send a pull request.')
+				])
 			])
 		]);
 	},

@@ -3,7 +3,7 @@
 		"description": "Grant access to the RJ11 phone port",
 		"read": {
 			"ubus": {
-				"fxs": [ "status", "calls", "history" ]
+				"fxs": [ "status", "version", "calls", "history" ]
 			},
 			"uci": [ "fxs" ]
 		},

@@ -23,6 +23,7 @@ starts by itself after a reboot.
 Other things that work:
 
 - HD calling (16 kHz wideband audio), off by default, turn it on in Settings
+- SIP calling through QModem voice (experimental, off by default, see below)
 - Caller ID on phones with a display (FSK Bellcore, FSK ETSI or DTMF, before or after the first ring)
 - Ringing tone in the handset while the other side rings
 - Hold: press FLASH during a call, press it again to come back
@@ -55,19 +56,19 @@ there with scp) and install them:
 
 ```
 cd /tmp
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.4.1/kmod-aw1000-fxs-6.12.94.0.2.0-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.4.1/fxsd-0.4.1-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.4.1/luci-app-fxs-0.4.1-r1.apk
-apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.2.0-r1.apk /tmp/fxsd-0.4.1-r1.apk /tmp/luci-app-fxs-0.4.1-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.5.0/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.5.0/fxsd-0.5.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.5.0/luci-app-fxs-0.5.0-r1.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk /tmp/fxsd-0.5.0-r1.apk /tmp/luci-app-fxs-0.5.0-r1.apk
 ```
 
-When updating, always update all three together (HD calling needs the 0.2.0 driver). The old
+When updating, always update all three together (SIP calling needs the 0.3.0 driver). The old
 kernel module stays loaded until it is removed, so stop fxsd and remove it before installing:
 
 ```
 /etc/init.d/fxsd stop
 rmmod aw1000_fxs
-apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.2.0-r1.apk /tmp/fxsd-0.4.1-r1.apk /tmp/luci-app-fxs-0.4.1-r1.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk /tmp/fxsd-0.5.0-r1.apk /tmp/luci-app-fxs-0.5.0-r1.apk
 /etc/init.d/fxsd start
 ```
 
@@ -121,8 +122,12 @@ Call history, Settings, Speed dial and Blocked numbers. The same settings are in
 | `patch` | `/etc/fxs/si3226x_patch.bin` | patch file |
 | `ringback` | `1` | ringing tone while the other side rings |
 | `hd` | `0` | HD calling (16 kHz). Changing it restarts the modem, mobile data drops for about 30 seconds |
+| `sip` | `0` | SIP calling through QModem voice (experimental) |
 | `callerid` | `bellcore` | caller ID format: bellcore, etsi, dtmf or off |
 | `callerid_timing` | `after` | send caller ID `after` the first ring (North America) or `before` it (most of Europe) |
+| `ring_pattern` | `standard` | how the phone rings: `standard` (2 s ring, 4 s pause), `short` (1 s, 4 s), `double` (UK and Australia) or `custom` |
+| `ring_on` | `2000` | ring time in ms for `custom` (200 to 8000) |
+| `ring_off` | `4000` | pause time in ms for `custom` (200 to 8000) |
 | `led` | `green:phone` | LED to use, empty to leave it alone |
 | `led_ready` | `on` | LED when the line is ready: on, slow, fast or off |
 | `led_ringing` | `fast` | LED while a call comes in |
@@ -135,10 +140,65 @@ Speed dial entries are `config speed` sections with `code` and `number`, blocked
 `config block` sections with `number`. Numbers are matched on the last 9 digits, so
 `0771234567` also blocks `+94771234567`.
 
-Logs: `logread -e fxsd`. Call log: `/etc/fxs/calls.log`.
+Logs: `logread -e fxsd`. Call log: `/etc/fxs/calls.log`. Phone numbers and dialed digits
+only go to the call log, not to the system log.
 
 If the router reboots while fxsd is starting up, it won't start again on that boot, just in
 case it was the cause. Run `/etc/init.d/fxsd clear_guard` or press the button in LuCI.
+
+If fxsd ever gets stuck for 30 seconds it stops itself, the driver puts the line back to idle
+and fxsd starts again.
+
+## SIP calling (experimental)
+
+With this on, SIP phones and apps on your network can make and answer calls through the SIM
+as well as the RJ11 phone. The SIP side is done by QModem voice (qmodem-voip and
+qmodem-sipd). fxsd hands it the modem audio and takes the RJ11 phone's calls through it, so
+both sides know about each other: an incoming call rings the RJ11 phone and the SIP phones,
+and whichever answers first gets the call.
+
+What you need:
+
+- a QModem build with AW1000 support in QModem voice. It was added in
+  [FUjr/QModem#290](https://github.com/FUjr/QModem/pull/290) and is in QModem main, not in a
+  release yet. You need qmodem-voip, qmodem-sipd and luci-app-qmodem-voip from it
+- at-daemon 3.4.0 or newer (QModem voice needs it)
+- the 0.3.0 kernel module or newer
+
+Some NoobWRT images don't have `kmod-sound-core`, and installing qmodem-sipd fails because
+alsa-lib asks for it. Nothing here uses it, so an empty package with that name is enough.
+
+QModem has to send its AT commands through the at-daemon. Once, on the router (`4_1` is the
+modem section, check yours with `uci show qmodem | grep modem-device`):
+
+```
+uci set qmodem.4_1.use_ubus=1
+uci commit qmodem
+reboot
+```
+
+Then in LuCI:
+
+1. QModem > VoIP: turn on Inbound SIP, type a SIP account name and press Generate for the
+   password. Write it down, it is shown once. Save.
+2. Services > Phone (RJ11) > Settings: tick SIP calling and save. fxsd turns on QModem voice
+   and the SIP service by itself.
+
+The Status page shows whether fxsd is connected to QModem voice. If QModem voice is not
+running, the RJ11 phone works on its own as before.
+
+In the SIP app (Linphone, Zoiper and so on) use the account name and password from step 1,
+domain `192.168.1.1` (your router's LAN address), port 5060, transport UDP. The phone has to
+be on the router's Wi-Fi or LAN. Keep the app running in the background or it can't ring.
+If it was closed, open it while the RJ11 phone is ringing and the call shows up.
+
+FLASH (hold and call waiting) on the RJ11 phone doesn't work while it is on. Calls to and
+from SIP use 8 kHz audio, even with HD calling on. A call answered on a SIP phone shows as
+"Answered on SIP" in the call history.
+
+This is new and still being tested. If calls drop, have no sound or the phone stops
+ringing, turn it off and open an [issue](https://github.com/Perz3us/openwrt-aw1000-phone/issues)
+with the output of `logread | grep -E 'fxsd|qmodem_voip'`.
 
 ## Problems
 

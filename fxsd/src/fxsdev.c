@@ -171,6 +171,21 @@ int fxsdev_stat(struct slic *s, uint32_t st[6])
 	return e;
 }
 
+int fxsdev_austat(struct slic *s, uint32_t st[4])
+{
+	struct fxs_austat a;
+	int e = io(FXS_AUDIO_STAT, &a);
+
+	(void)s;
+	if (!e) {
+		st[0] = a.under;
+		st[1] = a.over;
+		st[2] = a.drop;
+		st[3] = a.avail;
+	}
+	return e;
+}
+
 int fxsdev_pcm_rd(struct slic *s, uint32_t off, uint32_t *v)
 {
 	struct fxs_pcmreg r = { .off = off };

@@ -15,6 +15,7 @@ var PAGE = 50;
 var statusText = {
 	answered: _('Answered'),
 	missed: _('Missed'),
+	elsewhere: _('Answered on SIP'),
 	blocked: _('Blocked'),
 	failed: _('Failed'),
 	cancelled: _('Not answered'),
@@ -97,6 +98,7 @@ function parse(text, live) {
 			break;
 		case 'failed':
 		case 'missed':
+		case 'elsewhere':
 			if (c)
 				close(c, t, ev);
 			break;

@@ -5,10 +5,13 @@
 
 #include <linux/types.h>
 #include <linux/mutex.h>
+#include <linux/spinlock.h>
 #include <linux/wait.h>
 #include <linux/timer.h>
 #include <linux/gpio/consumer.h>
 #include "fxs_uapi.h"
+
+#define FXS_AU_RING	4096
 
 struct platform_device;
 
@@ -34,7 +37,14 @@ struct fxs_dev {
 
 	struct task_struct *br_task;
 	u32 br_moved, br_resync, br_ticks, br_status, br_peak_a, br_peak_b;
-	u8 br_ai, br_ao, br_bi, br_bo, br_words, br_wb;
+	u8 br_ai, br_ao, br_bi, br_bo, br_words, br_wb, br_user;
+
+	spinlock_t au_lock;
+	wait_queue_head_t auq;
+	u32 *au_rx, *au_tx;
+	u32 au_rx_head, au_rx_tail, au_tx_head, au_tx_tail;
+	u32 au_under, au_over, au_drop;
+	bool au_open;
 
 	u32 save[32];
 	bool clk_on, pll_on, adss_on, pcm_on, pins_on, spi_on, spi_drv_set;
@@ -48,6 +58,10 @@ int fxs_pcm_rd(struct fxs_dev *d, u32 off, u32 *val);
 int fxs_pcm_wr(struct fxs_dev *d, u32 off, u32 val);
 int fxs_pcm_capture(struct fxs_dev *d, u32 bitmap, u32 ms, u16 *w, u32 *n);
 int fxs_pcm_bridge(struct fxs_dev *d, u32 arg);
+u32 fxs_au_avail(struct fxs_dev *d);
+u32 fxs_au_period(struct fxs_dev *d);
+u32 fxs_au_read(struct fxs_dev *d, u32 *buf, u32 max);
+void fxs_au_write(struct fxs_dev *d, const u32 *buf, u32 n);
 int fxs_spi_init(struct fxs_dev *d);
 void fxs_spi_exit(struct fxs_dev *d);
 void fxs_slic_reset(struct fxs_dev *d, bool assert);

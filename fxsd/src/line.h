@@ -28,6 +28,7 @@ struct line_ops {
 	void (*log)(void *ctx, const char *what, const char *number);
 	const char *(*speed)(void *ctx, const char *code);
 	int (*blocked)(void *ctx, const char *number);
+	int (*elsewhere)(void *ctx);
 	void *ctx;
 };
 
@@ -44,9 +45,9 @@ struct line {
 	int onhook_pending;
 	int seen_call;
 	int ringback, ringback_on;
-	int recall, waiting_on, ncalls, active_id, held, blocked_id;
-	unsigned long t_state, t_digit, t_onhook, t_hangup;
-	unsigned dialtone_ms, digit_ms, flash_min_ms, flash_ms, busy_ms, setup_ms;
+	int recall, waiting_on, ncalls, active_id, held, blocked_id, released;
+	unsigned long t_state, t_digit, t_onhook, t_hangup, t_gone;
+	unsigned dialtone_ms, digit_ms, flash_min_ms, flash_ms, busy_ms, setup_ms, gone_ms;
 };
 
 void line_init(struct line *l, const struct line_ops *ops);
@@ -54,6 +55,7 @@ void line_hook(struct line *l, int offhook, unsigned long now);
 void line_digit(struct line *l, char d, unsigned long now);
 void line_modem(struct line *l, const struct clcc_call *calls, int n, unsigned long now);
 void line_tick(struct line *l, unsigned long now);
+void line_released(struct line *l);
 const char *line_state_name(enum line_state s);
 
 #endif

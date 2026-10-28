@@ -15,12 +15,16 @@
 #include "fxsdev.h"
 #include "line.h"
 #include "modem.h"
+#include "pcmsock.h"
 #include "si3226x_map.h"
 #include "si_line.h"
+#include "urc.h"
+#include "voip.h"
 
 #define POLL_MODEM_MS	500
 #define POLL_HOOK_MS	1000
 #define RING_ARM_MS	3000
+#define HANG_S		30
 #define STATE_FILE	"/var/run/fxsd.state"
 #define CALL_LOG	"/etc/fxs/calls.log"
 #define CALL_LOG_MAX	2000
@@ -33,17 +37,23 @@
 #define SPEED_FILE	"/var/run/fxsd.speed"
 #define BLOCK_FILE	"/var/run/fxsd.block"
 #define LIST_MAX	32
+#define PCM_SOCK	"/var/run/fxsd/pcm.sock"
+#define VOIP_CHECK_MS	5000
 
 struct fxsd {
 	struct slic s;
 	struct line line;
 	uint8_t ch;
-	int ringing, audio, verbose, wb;
-	int cid_mode, cid_pending, cid_before, test_ring;
+	int ringing, audio, verbose, wb, bridge, sip_audio;
+	int cid_mode, cid_pending, cid_before, test_ring, cad_phase;
 	int32_t vbat_mv, vline_mv, iloop_ua;
-	unsigned long t_ring_arm, t_gap, t_meas, t_test;
+	unsigned long t_ring_arm, t_gap, t_meas, t_test, t_cad;
 	long talk_since;
 };
+
+static unsigned int ring_cad[4] = { 2000, 4000, 0, 0 };
+static unsigned long data_since;
+static int data_redialed;
 
 static volatile sig_atomic_t stop, ring_test;
 static char own_number[CLCC_NUM_MAX];
@@ -54,6 +64,7 @@ static int led_mode[3] = { LED_ON, LED_FAST, LED_SLOW };
 static int led_cur = -1;
 static int keep_days;
 static int voice_off;
+static int sip_on, client;
 
 static void on_sig(int sig)
 {
@@ -229,6 +240,8 @@ static void op_ring(void *c, int on)
 		d->cid_pending = d->cid_mode != CID_OFF && !d->cid_before;
 		d->t_gap = 0;
 		d->t_ring_arm = now_ms();
+		d->cad_phase = 0;
+		d->t_cad = d->t_ring_arm;
 		si_linefeed(&d->s, d->ch, SI_LF_RING);
 	} else {
 		if (!d->s.rd(d->s.ctx, d->ch, SI_LINEFEED, &lf) && (lf & 0x0f) == SI_LF_RING)
@@ -238,28 +251,54 @@ static void op_ring(void *c, int on)
 	d->ringing = on;
 }
 
+static void apply_bridge(struct fxsd *d)
+{
+	int want = d->sip_audio ? 2 : d->audio ? 1 : 0;
+	uint32_t arg = 1u | (0u << 8) | (32u << 16) | (32u << 24) | 0x80000000u | (d->wb ? 0x40000000u : 0);
+
+	if (want == d->bridge)
+		return;
+	if (d->bridge) {
+		uint32_t st[6];
+
+		if (!fxsdev_stat(&d->s, st))
+			msg(LOG_INFO, "audio moved %u, resync %u, ticks %u, status 0x%x, peak modem %u, phone %u",
+			    st[0], st[1], st[2], st[3], st[4], st[5]);
+	}
+	if (d->bridge && want)
+		fxsdev_bridge(&d->s, 0);
+	if (fxsdev_bridge(&d->s, want ? arg | (want == 2 ? 0x80u : 0) : 0))
+		msg(LOG_ERR, "audio bridge %s failed", want ? "start" : "stop");
+	d->bridge = want;
+	pcmsock_live(want == 2);
+}
+
 static void op_audio(void *c, int on)
 {
 	struct fxsd *d = c;
 
-	if (on == d->audio)
-		return;
-	if (fxsdev_bridge(&d->s, on ? (1u | (0u << 8) | (32u << 16) | (32u << 24) | 0x80000000u |
-				       (d->wb ? 0x40000000u : 0)) : 0))
-		msg(LOG_ERR, "audio bridge %s failed", on ? "start" : "stop");
 	d->audio = on;
+	apply_bridge(d);
 }
 
 static void op_dial(void *c, const char *num)
 {
+	struct fxsd *d = c;
 	char cmd[64];
 	size_t n = 3;
 
-	(void)c;
 	memcpy(cmd, "ATD", 3);
 	for (; *num && n + 2 < sizeof(cmd); num++)
 		if (strchr("0123456789*#+", *num))
 			cmd[n++] = *num;
+	cmd[n] = 0;
+	if (client) {
+		if (voip_request("originate", cmd + 3)) {
+			msg(LOG_WARNING, "QModem voice did not accept the call");
+			d->line.seen_call = 1;
+		}
+		return;
+	}
 	cmd[n++] = ';';
 	cmd[n] = 0;
 	at(cmd);
@@ -268,13 +307,20 @@ static void op_dial(void *c, const char *num)
 static void op_answer(void *c)
 {
 	(void)c;
-	at("ATA");
+	if (!client)
+		at("ATA");
+	else if (voip_request("answer", NULL))
+		msg(LOG_WARNING, "QModem voice did not accept the answer");
 }
 
 static void op_hangup(void *c)
 {
-	(void)c;
-	at("AT+CHUP");
+	struct fxsd *d = c;
+
+	if (!client)
+		at("AT+CHUP");
+	else if (voip_request(d->line.state == LS_IDLE || d->line.state == LS_RINGING ? "reject" : "hangup", NULL))
+		msg(LOG_WARNING, "QModem voice did not accept the hangup");
 }
 
 static void op_chld(void *c, const char *arg)
@@ -388,7 +434,7 @@ static void op_log(void *c, const char *what, const char *num)
 	long sz = 0;
 
 	(void)c;
-	msg(LOG_INFO, "call %s %s", what, num ? num : "");
+	msg(LOG_INFO, "call %s", what);
 	if (f) {
 		fprintf(f, "%ld %s %s\n", (long)time(NULL), what, num ? num : "");
 		sz = ftell(f);
@@ -398,10 +444,16 @@ static void op_log(void *c, const char *what, const char *num)
 		trim_log();
 }
 
+static int op_elsewhere(void *c)
+{
+	(void)c;
+	return client && voip_snap()->answered && voip_snap()->owner == VO_OTHER;
+}
+
 static struct line_ops ops = {
 	.tone = op_tone, .ring = op_ring, .audio = op_audio, .dial = op_dial,
 	.answer = op_answer, .hangup = op_hangup, .chld = op_chld, .log = op_log,
-	.speed = op_speed, .blocked = op_blocked,
+	.speed = op_speed, .blocked = op_blocked, .elsewhere = op_elsewhere,
 };
 
 static void put_state(const char *state, const char *peer, int offhook)
@@ -421,9 +473,10 @@ static void write_state(struct fxsd *d)
 
 	if (!f)
 		return;
-	fprintf(f, "state=%s\npeer=%s\noffhook=%d\nvbat=%d\nvline=%d\niloop=%d\nown=%s\ntest=%d\nvoiceoff=%d\nsince=%ld\nhd=%d\n",
+	fprintf(f, "state=%s\npeer=%s\noffhook=%d\nvbat=%d\nvline=%d\niloop=%d\nown=%s\ntest=%d\nvoiceoff=%d\nsince=%ld\nhd=%d\nsip=%d\nsipcall=%d\n",
 		line_state_name(d->line.state), d->line.peer, d->line.offhook,
-		d->vbat_mv, d->vline_mv, d->iloop_ua, own_number, d->test_ring, voice_off, d->talk_since, d->wb);
+		d->vbat_mv, d->vline_mv, d->iloop_ua, own_number, d->test_ring, voice_off, d->talk_since, d->wb,
+		sip_on ? (client ? 2 : 1) : 0, d->sip_audio);
 	fclose(f);
 	rename(STATE_FILE ".tmp", STATE_FILE);
 }
@@ -554,8 +607,27 @@ static void switch_rate(int hd)
 	put_state("modem_restart", "", 0);
 	snprintf(cmd, sizeof(cmd), "AT+QDAI=x,1,0,4,0,%d,1,1", hd);
 	at(cmd);
+	data_since = now_ms();
+	data_redialed = 0;
 	if (modem_restart())
 		msg(LOG_WARNING, "modem did not come back after the restart");
+}
+
+static void data_tick(unsigned long now)
+{
+	if (!data_since || now - data_since < 5000)
+		return;
+	if (modem_data_up()) {
+		msg(LOG_INFO, "mobile data back %lu s after the modem restart", (now - data_since) / 1000);
+		data_since = 0;
+	} else if (now - data_since >= 600000) {
+		msg(LOG_WARNING, "no mobile data 10 minutes after the modem restart");
+		data_since = 0;
+	} else if (now - data_since >= 180000 && !data_redialed) {
+		msg(LOG_WARNING, "no mobile data 3 minutes after the modem restart, dialing again");
+		modem_redial();
+		data_redialed = 1;
+	}
 }
 
 static void check_hook(struct fxsd *d, unsigned long now)
@@ -575,11 +647,8 @@ static void handle_irq(struct fxsd *d, unsigned long now)
 		return;
 	if (irq[1] & (SI_IRQ2_LCR | SI_IRQ2_RTP))
 		check_hook(d, now);
-	if ((irq[1] & SI_IRQ2_DTMF) && !si_dtmf_digit(&d->s, d->ch, &digit)) {
-		if (d->verbose)
-			msg(LOG_DEBUG, "digit %c", digit);
+	if ((irq[1] & SI_IRQ2_DTMF) && !si_dtmf_digit(&d->s, d->ch, &digit))
 		line_digit(&d->line, digit, now);
-	}
 	if (irq[2] & (SI_IRQ3_HVIC | SI_IRQ3_THERM))
 		msg(LOG_WARNING, "SLIC power alarm 0x%02x", irq[2]);
 }
@@ -591,7 +660,14 @@ static void poll_cid(struct fxsd *d, unsigned long now)
 	uint8_t lf;
 	int e;
 
-	if (!d->ringing || !d->cid_pending || d->s.rd(d->s.ctx, d->ch, SI_LINEFEED, &lf))
+	if (!d->ringing || !d->cid_pending)
+		return;
+	if (ring_cad[2]) {
+		if (d->cad_phase != 3 || now - d->t_cad < 400)
+			return;
+		goto send;
+	}
+	if (d->s.rd(d->s.ctx, d->ch, SI_LINEFEED, &lf))
 		return;
 	if ((lf & 0xf0) == 0x40 || (lf & 0x0f) != SI_LF_RING) {
 		if ((lf & 0xf0) == 0x40)
@@ -607,6 +683,7 @@ static void poll_cid(struct fxsd *d, unsigned long now)
 	}
 	if (now - d->t_gap < 600)
 		return;
+send:
 	d->cid_pending = 0;
 	fxsdev_ring_arm(&d->s, RING_ARM_MS);
 	d->t_ring_arm = now;
@@ -618,24 +695,99 @@ static void poll_cid(struct fxsd *d, unsigned long now)
 		msg(LOG_INFO, "caller ID sent in %lu ms", now_ms() - now);
 }
 
+static void ring_cad_tick(struct fxsd *d, unsigned long now)
+{
+	if (!ring_cad[2] || !(d->ringing || d->test_ring) || now - d->t_cad < ring_cad[d->cad_phase])
+		return;
+	d->cad_phase = (d->cad_phase + 1) & 3;
+	d->t_cad = now;
+	si_linefeed(&d->s, d->ch, d->cad_phase & 1 ? SI_LF_FWD : SI_LF_RING);
+}
+
+static void ring_parse(const char *s)
+{
+	unsigned int v[4] = { 0, 0, 0, 0 };
+	int n = sscanf(s, "%u,%u,%u,%u", &v[0], &v[1], &v[2], &v[3]), i;
+
+	if (n != 2 && n != 4)
+		return;
+	for (i = 0; i < n; i++)
+		if (v[i] < 100 || v[i] > 8000)
+			return;
+	memcpy(ring_cad, v, sizeof(ring_cad));
+}
+
+static uint16_t ring_ticks(unsigned int ms)
+{
+	return ms >= 8191 ? 0xffff : ms * 8;
+}
+
 static void poll_modem(struct fxsd *d, unsigned long now)
 {
 	char r[1024];
 	struct clcc_call c[CLCC_MAX];
 
+	if (client) {
+		const struct voip_snap *v = voip_snap();
+		int sip = voip_sip_audio(v);
+
+		line_modem(&d->line, c, voip_calls(v, c), now);
+		if (sip != d->sip_audio) {
+			d->sip_audio = sip;
+			apply_bridge(d);
+			write_state(d);
+		}
+		return;
+	}
 	if (modem_at("AT+CLCC", r, sizeof(r)) || !strstr(r, "OK"))
 		return;
 	line_modem(&d->line, c, clcc_parse_all(r, c, CLCC_MAX), now);
+}
+
+static void sip_tick(struct fxsd *d, unsigned long now, unsigned long *t_check)
+{
+	const struct voip_snap *v = voip_snap();
+	int want;
+
+	if (!sip_on)
+		return;
+	voip_events();
+	if (now - *t_check >= VOIP_CHECK_MS) {
+		*t_check = now;
+		if (voip_connected())
+			voip_refresh();
+		else
+			voip_connect();
+	}
+	want = voip_connected() && v->enabled && v->st != VS_DISABLED;
+	if (want != client && d->line.state == LS_IDLE && !d->ringing && !d->test_ring) {
+		client = want;
+		ops.chld = client ? NULL : op_chld;
+		d->line.gone_ms = client ? 0 : 3000;
+		d->sip_audio = 0;
+		apply_bridge(d);
+		msg(LOG_INFO, client ? "SIP calling on, calls go through QModem voice" :
+		    "QModem voice is not running, using the modem directly");
+		write_state(d);
+	}
+	if (client && voip_changed())
+		poll_modem(d, now);
 }
 
 static int setup(struct fxsd *d, const struct si_patch *p, int gtx, int grx)
 {
 	struct si_pwr_report rep[2];
 	struct si_imp imp = aw1000_imp_600;
+	struct si_ring ring = aw1000_ring;
+	uint16_t on = ring_ticks(ring_cad[2] ? 8191 : ring_cad[0]), off = ring_ticks(ring_cad[1]);
 	int e;
 
 	imp.txgain_db = gtx;
 	imp.rxgain_db = grx;
+	ring.talo = on & 0xff;
+	ring.tahi = on >> 8;
+	ring.tilo = off & 0xff;
+	ring.tihi = off >> 8;
 	if ((e = fxsdev_pcm(&d->s, 1)) || (e = fxsdev_reset(&d->s, 1)))
 		return e;
 	d->s.delay(d->s.ctx, 50);
@@ -648,7 +800,7 @@ static int setup(struct fxsd *d, const struct si_patch *p, int gtx, int grx)
 	if ((e = si_dcfeed_setup(&d->s, d->ch, &aw1000_dcfeed)) ||
 	    (e = si_linefeed(&d->s, d->ch, SI_LF_FWD)) ||
 	    (e = si_zsynth_setup(&d->s, d->ch, &imp)) ||
-	    (e = si_ring_setup(&d->s, d->ch, &aw1000_ring, &aw1000_gen_cfg)) ||
+	    (e = si_ring_setup(&d->s, d->ch, &ring, &aw1000_gen_cfg)) ||
 	    (e = si_pcm_setup(&d->s, d->ch, 31, 32)) ||
 	    (d->wb && (e = si_pcm_wideband(&d->s, d->ch))) ||
 	    (e = si_irq_enable(&d->s, d->ch, &aw1000_gen_cfg)))
@@ -658,7 +810,7 @@ static int setup(struct fxsd *d, const struct si_patch *p, int gtx, int grx)
 
 static int usage(void)
 {
-	fprintf(stderr, "usage: fxsd -p PATCH [-c CHANNEL] [-g TXDB,RXDB] [-a ATPORT] [-l VOLUME] [-r RXGAIN] [-e LED] [-m READY,RINGING,OFFHOOK] [-b 0|1] [-i bellcore|etsi|dtmf|off] [-t before|after] [-k DAYS] [-w 0|1] [-f] [-v]\n");
+	fprintf(stderr, "usage: fxsd -p PATCH [-c CHANNEL] [-g TXDB,RXDB] [-a ATPORT] [-l VOLUME] [-r RXGAIN] [-e LED] [-m READY,RINGING,OFFHOOK] [-b 0|1] [-i bellcore|etsi|dtmf|off] [-t before|after] [-k DAYS] [-w 0|1] [-s 0|1] [-n ON,OFF[,ON,OFF]] [-f] [-v]\n");
 	return 2;
 }
 
@@ -667,14 +819,14 @@ int main(int argc, char **argv)
 	const char *patch = NULL;
 	struct fxsd d = { .ch = 1, .cid_mode = CID_BELLCORE };
 	struct si_patch p;
-	unsigned long t_modem = 0, t_hook = 0, t_ready, t_prune;
+	unsigned long t_modem = 0, t_hook = 0, t_ready, t_prune, t_voip, t_urc, t_alive = 0;
 	int guard = 1;
 	enum line_state last = LS_BUSY + 1;
 	int gtx = -6, grx = 0, fg = 0, vol = -1, rxg = -1, o, e, q;
 	int ringback = 1, hd = 0;
 	char r[512];
 
-	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:fv")) != -1) {
+	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:s:n:fv")) != -1) {
 		switch (o) {
 		case 'p': patch = optarg; break;
 		case 'c': d.ch = atoi(optarg) & 1; break;
@@ -689,6 +841,8 @@ int main(int argc, char **argv)
 		case 't': d.cid_before = !strcmp(optarg, "before"); break;
 		case 'k': keep_days = atoi(optarg); break;
 		case 'w': hd = atoi(optarg) == 1; break;
+		case 's': sip_on = atoi(optarg) == 1; break;
+		case 'n': ring_parse(optarg); break;
 		case 'f': fg = 1; break;
 		case 'v': d.verbose = 1; break;
 		default: return usage();
@@ -743,15 +897,23 @@ int main(int argc, char **argv)
 	ops.ctx = &d;
 	line_init(&d.line, &ops);
 	d.line.ringback = ringback;
-	msg(LOG_INFO, "ready on channel %u, modem AT port %s", d.ch, modem_port());
+	if (sip_on && (e = pcmsock_start(PCM_SOCK, "/dev/fxs0audio", d.wb))) {
+		msg(LOG_ERR, "SIP calling needs the newer kernel module (%s), turning it off", strerror(-e));
+		sip_on = 0;
+		e = 0;
+	}
+	msg(LOG_INFO, "ready on channel %u, modem AT port %s%s", d.ch, modem_port(),
+	    sip_on ? ", SIP calling on (experimental)" : "");
 	trim_log();
 	led_update(led_want(&d), 0);
 	t_ready = now_ms();
 	t_prune = t_ready;
+	t_voip = t_ready - VOIP_CHECK_MS;
+	t_urc = t_ready - VOIP_CHECK_MS;
 
 	while (!stop) {
 		unsigned long now = now_ms();
-		int w = fxsdev_wait(&d.s, d.ringing && d.cid_pending ? 20 : 100);
+		int w = fxsdev_wait(&d.s, (d.ringing || d.test_ring) && (d.cid_pending || ring_cad[2]) ? 20 : 100);
 
 		now = now_ms();
 		if (w > 0) {
@@ -762,11 +924,22 @@ int main(int argc, char **argv)
 			check_hook(&d, now);
 			t_hook = now;
 		}
+		sip_tick(&d, now, &t_voip);
+		if (now - t_urc >= VOIP_CHECK_MS) {
+			urc_start();
+			t_urc = now;
+		}
+		if (urc_released()) {
+			line_released(&d.line);
+			t_modem = now - POLL_MODEM_MS;
+		}
 		if (now - t_modem >= POLL_MODEM_MS) {
 			poll_modem(&d, now);
 			t_modem = now;
 		}
 		poll_cid(&d, now);
+		ring_cad_tick(&d, now);
+		data_tick(now);
 		test_ring_tick(&d, now);
 		if (now - d.t_meas >= 2000) {
 			measure(&d);
@@ -777,6 +950,10 @@ int main(int argc, char **argv)
 		if (d.ringing && now - d.t_ring_arm >= 1000) {
 			fxsdev_ring_arm(&d.s, RING_ARM_MS);
 			d.t_ring_arm = now;
+		}
+		if (now - t_alive >= 1000) {
+			alarm(HANG_S);
+			t_alive = now;
 		}
 		line_tick(&d.line, now);
 		led_update(led_want(&d), 0);
@@ -797,13 +974,17 @@ int main(int argc, char **argv)
 			write_state(&d);
 		}
 	}
+	alarm(0);
 	msg(LOG_INFO, "stopping");
 	if (d.line.state == LS_CALLING || d.line.state == LS_TALKING)
-		at("AT+CHUP");
+		op_hangup(&d);
 out:
 	led_set(LED_OFF);
 	fxsdev_ring_arm(&d.s, 0);
 	fxsdev_bridge(&d.s, 0);
+	pcmsock_stop();
+	voip_disconnect();
+	urc_stop();
 	si_power_down(&d.s, d.ch);
 	fxsdev_reset(&d.s, 1);
 	fxsdev_pcm(&d.s, 0);

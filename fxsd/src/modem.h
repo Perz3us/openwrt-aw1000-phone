@@ -11,5 +11,7 @@ const char *modem_port(void);
 int modem_port_ok(void);
 int modem_restart(void);
 void modem_heal(void);
+void modem_redial(void);
+int modem_data_up(void);
 
 #endif

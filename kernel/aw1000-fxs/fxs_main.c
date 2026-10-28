@@ -178,6 +178,18 @@ static long fxs_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 			ret = -EFAULT;
 		break;
 	}
+	case FXS_AUDIO_STAT: {
+		struct fxs_austat st = {
+			.under = READ_ONCE(fxs.au_under),
+			.over = READ_ONCE(fxs.au_over),
+			.drop = READ_ONCE(fxs.au_drop),
+			.avail = fxs_au_avail(&fxs),
+		};
+
+		if (copy_to_user(p, &st, sizeof(st)))
+			ret = -EFAULT;
+		break;
+	}
 	default:
 		ret = -ENOTTY;
 	}
@@ -225,6 +237,98 @@ static struct miscdevice fxs_misc = {
 	.fops = &fxs_fops,
 };
 
+#define AU_CHUNK	1024
+
+static int au_open(struct inode *i, struct file *f)
+{
+	u32 *buf = kmalloc_array(AU_CHUNK, sizeof(u32), GFP_KERNEL);
+
+	if (!buf)
+		return -ENOMEM;
+	mutex_lock(&fxs.lock);
+	if (fxs.au_open) {
+		mutex_unlock(&fxs.lock);
+		kfree(buf);
+		return -EBUSY;
+	}
+	fxs.au_open = true;
+	mutex_unlock(&fxs.lock);
+	f->private_data = buf;
+	return 0;
+}
+
+static int au_release(struct inode *i, struct file *f)
+{
+	kfree(f->private_data);
+	mutex_lock(&fxs.lock);
+	fxs.au_open = false;
+	mutex_unlock(&fxs.lock);
+	return 0;
+}
+
+static ssize_t au_read(struct file *f, char __user *ubuf, size_t len, loff_t *off)
+{
+	u32 *buf = f->private_data;
+	u32 n;
+	int ret;
+
+	if (len < sizeof(u32))
+		return -EINVAL;
+	if (!(f->f_flags & O_NONBLOCK)) {
+		ret = wait_event_interruptible(fxs.auq, !READ_ONCE(fxs.br_user) ||
+			fxs_au_avail(&fxs) >= fxs_au_period(&fxs));
+		if (ret)
+			return ret;
+	}
+	n = fxs_au_read(&fxs, buf, min_t(size_t, len / sizeof(u32), AU_CHUNK));
+	if (!n)
+		return READ_ONCE(fxs.br_user) ? -EAGAIN : 0;
+	if (copy_to_user(ubuf, buf, n * sizeof(u32)))
+		return -EFAULT;
+	return n * sizeof(u32);
+}
+
+static ssize_t au_write(struct file *f, const char __user *ubuf, size_t len, loff_t *off)
+{
+	u32 *buf = f->private_data;
+	u32 n = min_t(size_t, len / sizeof(u32), AU_CHUNK);
+
+	if (!READ_ONCE(fxs.br_user))
+		return -EIO;
+	if (!n)
+		return -EINVAL;
+	if (copy_from_user(buf, ubuf, n * sizeof(u32)))
+		return -EFAULT;
+	fxs_au_write(&fxs, buf, n);
+	return n * sizeof(u32);
+}
+
+static __poll_t au_poll(struct file *f, poll_table *w)
+{
+	__poll_t mask = EPOLLOUT | EPOLLWRNORM;
+
+	poll_wait(f, &fxs.auq, w);
+	if (READ_ONCE(fxs.br_user) && fxs_au_avail(&fxs) >= fxs_au_period(&fxs))
+		mask |= EPOLLIN | EPOLLRDNORM;
+	return mask;
+}
+
+static const struct file_operations au_fops = {
+	.owner = THIS_MODULE,
+	.open = au_open,
+	.release = au_release,
+	.read = au_read,
+	.write = au_write,
+	.poll = au_poll,
+	.llseek = noop_llseek,
+};
+
+static struct miscdevice au_misc = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "fxs0audio",
+	.fops = &au_fops,
+};
+
 static void fxs_unmap(void)
 {
 	if (fxs.tlmm)
@@ -250,7 +354,16 @@ static int __init fxs_init(void)
 	memset(&fxs, 0, sizeof(fxs));
 	mutex_init(&fxs.lock);
 	init_waitqueue_head(&fxs.evq);
+	init_waitqueue_head(&fxs.auq);
+	spin_lock_init(&fxs.au_lock);
 	timer_setup(&fxs.ring_wd, ring_wd_fire, 0);
+
+	fxs.au_rx = kcalloc(FXS_AU_RING, sizeof(u32), GFP_KERNEL);
+	fxs.au_tx = kcalloc(FXS_AU_RING, sizeof(u32), GFP_KERNEL);
+	if (!fxs.au_rx || !fxs.au_tx) {
+		ret = -ENOMEM;
+		goto err_map;
+	}
 
 	fxs.gcc = ioremap(GCC_BASE, GCC_SIZE);
 	fxs.adss_glb = ioremap(ADSS_GLB_BASE, ADSS_GLB_SIZE);
@@ -274,25 +387,35 @@ static int __init fxs_init(void)
 	ret = misc_register(&fxs_misc);
 	if (ret)
 		goto err_spi;
+	ret = misc_register(&au_misc);
+	if (ret)
+		goto err_misc;
 	return 0;
 
+err_misc:
+	misc_deregister(&fxs_misc);
 err_spi:
 	fxs_spi_exit(&fxs);
 err_clk:
 	fxs_clk_disable(&fxs);
 err_map:
 	fxs_unmap();
+	kfree(fxs.au_rx);
+	kfree(fxs.au_tx);
 	return ret;
 }
 
 static void __exit fxs_exit(void)
 {
+	misc_deregister(&au_misc);
 	misc_deregister(&fxs_misc);
 	timer_delete_sync(&fxs.ring_wd);
 	fxs_spi_exit(&fxs);
 	fxs_pcm_stop(&fxs);
 	fxs_clk_disable(&fxs);
 	fxs_unmap();
+	kfree(fxs.au_rx);
+	kfree(fxs.au_tx);
 }
 
 module_init(fxs_init);

@@ -5,7 +5,7 @@ include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=aw1000-fxs
-PKG_VERSION:=0.2.0
+PKG_VERSION:=0.3.0
 PKG_RELEASE:=1
 PKG_LICENSE:=GPL-2.0-only
 PKG_MAINTAINER:=perz3us

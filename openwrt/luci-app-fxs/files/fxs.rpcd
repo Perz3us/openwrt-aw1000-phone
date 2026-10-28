@@ -9,7 +9,7 @@ CALLS=/etc/fxs/calls.log
 GUARD=/etc/fxs/.starting
 
 status() {
-	local state=stopped peer= offhook=0 vbat= vline= iloop= own= testring=0 voiceoff=0 since=0 hd=0 k v patch
+	local state=stopped peer= offhook=0 vbat= vline= iloop= own= testring=0 voiceoff=0 since=0 hd=0 sip=0 sipcall=0 k v patch
 
 	if [ -f "$STATE" ]; then
 		while IFS='=' read -r k v; do
@@ -25,6 +25,8 @@ status() {
 			voiceoff) voiceoff="$v" ;;
 			since) since="$v" ;;
 			hd) hd="$v" ;;
+			sip) sip="$v" ;;
+			sipcall) sipcall="$v" ;;
 			esac
 		done < "$STATE"
 	fi
@@ -38,6 +40,8 @@ status() {
 	json_add_boolean testring "$testring"
 	json_add_boolean voiceoff "$voiceoff"
 	json_add_boolean hd "$hd"
+	json_add_int sip "$sip"
+	json_add_boolean sipcall "$sipcall"
 	[ "$state" = talking ] && [ "${since:-0}" -gt 0 ] && json_add_int duration $(($(date +%s) - since))
 	[ -n "$vbat" ] && json_add_int vbat "$vbat"
 	[ -n "$vline" ] && json_add_int vline "$vline"
@@ -47,6 +51,22 @@ status() {
 	json_add_boolean guard "$([ -f "$GUARD" ] && echo 1 || echo 0)"
 	json_add_boolean patch "$([ -s "${patch:-/etc/fxs/si3226x_patch.bin}" ] && echo 1 || echo 0)"
 	json_add_boolean enabled "$(uci -q get fxs.main.enabled || echo 1)"
+	json_dump
+}
+
+pkg_version() {
+	local v
+
+	v=$(apk list -I "$1" 2>/dev/null | sed -n "s/^$1-\([^ ]*\) .*/\1/p" | head -1)
+	[ -n "$v" ] || v=$(opkg list-installed "$1" 2>/dev/null | sed -n "s/^$1 - //p")
+	echo "$v"
+}
+
+version() {
+	json_init
+	json_add_string fxsd "$(pkg_version fxsd)"
+	json_add_string luci "$(pkg_version luci-app-fxs)"
+	json_add_string driver "$(pkg_version kmod-aw1000-fxs | sed 's/.*\.\([0-9]*\.[0-9]*\.[0-9]*-r[0-9]*\)$/\1/')"
 	json_dump
 }
 
@@ -124,11 +144,12 @@ delete_calls() {
 
 case "$1" in
 list)
-	echo '{ "status": {}, "calls": {}, "history": {}, "delete_calls": { "lines": [] }, "clear_history": {},"clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {} }'
+	echo '{ "status": {}, "version": {}, "calls": {}, "history": {}, "delete_calls": { "lines": [] }, "clear_history": {},"clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {} }'
 	;;
 call)
 	case "$2" in
 	status) status ;;
+	version) version ;;
 	calls) calls ;;
 	history) history ;;
 	delete_calls) delete_calls ;;
