@@ -39,13 +39,17 @@
 #define LIST_MAX	32
 #define PCM_SOCK	"/var/run/fxsd/pcm.sock"
 #define VOIP_CHECK_MS	5000
+#define DND_REPEAT_S	180
+#define RING_PHONE_UA	2200
 
 struct fxsd {
 	struct slic s;
 	struct line line;
 	uint8_t ch;
 	int ringing, audio, verbose, wb, bridge, sip_audio;
-	int cid_mode, cid_pending, cid_before, test_ring, cad_phase;
+	int cid_mode, cid_pending, cid_before, test_ring, cad_phase, silent;
+	int phone, ring_n, ring_quiet;
+	long long ring_sum;
 	int32_t vbat_mv, vline_mv, iloop_ua;
 	unsigned long t_ring_arm, t_gap, t_meas, t_test, t_cad;
 	long talk_since;
@@ -63,6 +67,7 @@ enum { LED_READY, LED_RINGING, LED_OFFHOOK };
 static int led_mode[3] = { LED_ON, LED_FAST, LED_SLOW };
 static int led_cur = -1;
 static int keep_days;
+static int dnd_from = -1, dnd_to = -1;
 static int voice_off;
 static int sip_on, client;
 
@@ -145,10 +150,6 @@ static void led_update(int mode, int verify)
 
 	if (!*led_name)
 		return;
-	if (!access(LED_NIGHT, F_OK)) {
-		led_cur = -1;
-		return;
-	}
 	if (mode != led_cur) {
 		led_set(mode);
 		return;
@@ -168,6 +169,8 @@ static int led_want(const struct fxsd *d)
 {
 	if (d->ringing || d->test_ring)
 		return led_mode[LED_RINGING];
+	if (!access(LED_NIGHT, F_OK))
+		return LED_OFF;
 	if (d->line.offhook || d->line.state != LS_IDLE)
 		return led_mode[LED_OFFHOOK];
 	return led_mode[LED_READY];
@@ -218,11 +221,83 @@ static void op_tone(void *c, enum line_tone t)
 	si_tone_start(&d->s, d->ch, t != TONE_DIAL);
 }
 
+static int same_number(const char *a, const char *b);
+
+static int dnd_now(void)
+{
+	time_t t = time(NULL);
+	struct tm tm;
+	int m;
+
+	if (dnd_from < 0 || dnd_from == dnd_to)
+		return 0;
+	localtime_r(&t, &tm);
+	m = tm.tm_hour * 60 + tm.tm_min;
+	return dnd_from < dnd_to ? m >= dnd_from && m < dnd_to : m >= dnd_from || m < dnd_to;
+}
+
+static int dnd_silence(struct fxsd *d)
+{
+	static char last[CLCC_NUM_MAX];
+	static time_t t_last;
+	time_t now = time(NULL);
+
+	if (d->test_ring || d->line.recall || !dnd_now())
+		return 0;
+	if (*d->line.peer && *last && same_number(last, d->line.peer) && now - t_last < DND_REPEAT_S) {
+		*last = 0;
+		msg(LOG_INFO, "second call within %d minutes, ringing", DND_REPEAT_S / 60);
+		return 0;
+	}
+	snprintf(last, sizeof(last), "%s", d->line.peer);
+	t_last = now;
+	msg(LOG_INFO, "do not disturb, not ringing");
+	return 1;
+}
+
+static void ring_sample(struct fxsd *d)
+{
+	uint32_t raw;
+	int32_t u;
+
+	if (!d->ringing || d->silent || d->s.rdram(d->s.ctx, d->ch, RAM_MADC_ILOOP, &raw))
+		return;
+	u = si_iloop_ua(raw);
+	d->ring_sum += u < 0 ? -u : u;
+	d->ring_n++;
+}
+
+static void ring_done(struct fxsd *d)
+{
+	if (d->ring_n >= 20) {
+		if (d->ring_sum / d->ring_n >= RING_PHONE_UA) {
+			d->ring_quiet = 0;
+			d->phone = 1;
+		} else if (++d->ring_quiet >= 2 || d->test_ring) {
+			if (d->phone != 0)
+				msg(LOG_WARNING, "no ring current, check that a phone is plugged in");
+			d->phone = 0;
+		}
+	}
+	d->ring_n = 0;
+	d->ring_sum = 0;
+}
+
 static void op_ring(void *c, int on)
 {
 	struct fxsd *d = c;
 	uint8_t lf;
 
+	if (on && (d->silent = dnd_silence(d))) {
+		d->ringing = 1;
+		d->cid_pending = 0;
+		return;
+	}
+	if (!on && d->silent) {
+		d->silent = 0;
+		d->ringing = 0;
+		return;
+	}
 	if (on) {
 		if (d->cid_before && d->cid_mode != CID_OFF && !d->line.recall && !d->test_ring) {
 			struct tm tm;
@@ -231,7 +306,13 @@ static void op_ring(void *c, int on)
 			int e;
 
 			localtime_r(&t, &tm);
-			if ((e = cid_send_before(&d->s, d->ch, d->cid_mode, d->line.peer, &tm)))
+			if (d->cid_before == 2 && d->cid_mode != CID_DTMF) {
+				fxsdev_ring_arm(&d->s, RING_ARM_MS);
+				e = cid_send_rpas(&d->s, d->ch, d->cid_mode, d->line.peer, &tm);
+			} else {
+				e = cid_send_before(&d->s, d->ch, d->cid_mode, d->line.peer, &tm);
+			}
+			if (e)
 				msg(LOG_WARNING, "caller ID failed: %s", strerror(-e));
 			else
 				msg(LOG_INFO, "caller ID sent before ring in %lu ms", now_ms() - t0);
@@ -244,6 +325,7 @@ static void op_ring(void *c, int on)
 		d->t_cad = d->t_ring_arm;
 		si_linefeed(&d->s, d->ch, SI_LF_RING);
 	} else {
+		ring_done(d);
 		if (!d->s.rd(d->s.ctx, d->ch, SI_LINEFEED, &lf) && (lf & 0x0f) == SI_LF_RING)
 			si_linefeed(&d->s, d->ch, SI_LF_FWD);
 		fxsdev_ring_arm(&d->s, 0);
@@ -473,10 +555,10 @@ static void write_state(struct fxsd *d)
 
 	if (!f)
 		return;
-	fprintf(f, "state=%s\npeer=%s\noffhook=%d\nvbat=%d\nvline=%d\niloop=%d\nown=%s\ntest=%d\nvoiceoff=%d\nsince=%ld\nhd=%d\nsip=%d\nsipcall=%d\n",
+	fprintf(f, "state=%s\npeer=%s\noffhook=%d\nvbat=%d\nvline=%d\niloop=%d\nown=%s\ntest=%d\nvoiceoff=%d\nsince=%ld\nhd=%d\nsip=%d\nsipcall=%d\ndnd=%d\nsilent=%d\nphone=%d\n",
 		line_state_name(d->line.state), d->line.peer, d->line.offhook,
 		d->vbat_mv, d->vline_mv, d->iloop_ua, own_number, d->test_ring, voice_off, d->talk_since, d->wb,
-		sip_on ? (client ? 2 : 1) : 0, d->sip_audio);
+		sip_on ? (client ? 2 : 1) : 0, d->sip_audio, dnd_now(), d->silent, d->phone);
 	fclose(f);
 	rename(STATE_FILE ".tmp", STATE_FILE);
 }
@@ -697,11 +779,21 @@ send:
 
 static void ring_cad_tick(struct fxsd *d, unsigned long now)
 {
-	if (!ring_cad[2] || !(d->ringing || d->test_ring) || now - d->t_cad < ring_cad[d->cad_phase])
+	if (!ring_cad[2] || d->silent || !(d->ringing || d->test_ring) || now - d->t_cad < ring_cad[d->cad_phase])
 		return;
 	d->cad_phase = (d->cad_phase + 1) & 3;
 	d->t_cad = now;
 	si_linefeed(&d->s, d->ch, d->cad_phase & 1 ? SI_LF_FWD : SI_LF_RING);
+}
+
+static void dnd_parse(const char *s)
+{
+	unsigned int h1, m1, h2, m2;
+
+	if (sscanf(s, "%u:%u,%u:%u", &h1, &m1, &h2, &m2) != 4 || h1 > 23 || h2 > 23 || m1 > 59 || m2 > 59)
+		return;
+	dnd_from = h1 * 60 + m1;
+	dnd_to = h2 * 60 + m2;
 }
 
 static void ring_parse(const char *s)
@@ -817,7 +909,7 @@ static int usage(void)
 int main(int argc, char **argv)
 {
 	const char *patch = NULL;
-	struct fxsd d = { .ch = 1, .cid_mode = CID_BELLCORE };
+	struct fxsd d = { .ch = 1, .cid_mode = CID_BELLCORE, .phone = -1 };
 	struct si_patch p;
 	unsigned long t_modem = 0, t_hook = 0, t_ready, t_prune, t_voip, t_urc, t_alive = 0;
 	int guard = 1;
@@ -826,7 +918,7 @@ int main(int argc, char **argv)
 	int ringback = 1, hd = 0;
 	char r[512];
 
-	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:s:n:fv")) != -1) {
+	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:s:n:q:fv")) != -1) {
 		switch (o) {
 		case 'p': patch = optarg; break;
 		case 'c': d.ch = atoi(optarg) & 1; break;
@@ -838,11 +930,12 @@ int main(int argc, char **argv)
 		case 'm': led_modes_parse(optarg); break;
 		case 'b': ringback = atoi(optarg); break;
 		case 'i': d.cid_mode = cid_mode_parse(optarg); break;
-		case 't': d.cid_before = !strcmp(optarg, "before"); break;
+		case 't': d.cid_before = !strcmp(optarg, "rpas") ? 2 : !strcmp(optarg, "before"); break;
 		case 'k': keep_days = atoi(optarg); break;
 		case 'w': hd = atoi(optarg) == 1; break;
 		case 's': sip_on = atoi(optarg) == 1; break;
 		case 'n': ring_parse(optarg); break;
+		case 'q': dnd_parse(optarg); break;
 		case 'f': fg = 1; break;
 		case 'v': d.verbose = 1; break;
 		default: return usage();
@@ -922,6 +1015,10 @@ int main(int argc, char **argv)
 		}
 		if (now - t_hook >= POLL_HOOK_MS) {
 			check_hook(&d, now);
+			if (d.line.offhook) {
+				d.phone = 1;
+				d.ring_quiet = 0;
+			}
 			t_hook = now;
 		}
 		sip_tick(&d, now, &t_voip);
@@ -937,6 +1034,7 @@ int main(int argc, char **argv)
 			poll_modem(&d, now);
 			t_modem = now;
 		}
+		ring_sample(&d);
 		poll_cid(&d, now);
 		ring_cad_tick(&d, now);
 		data_tick(now);
@@ -947,7 +1045,7 @@ int main(int argc, char **argv)
 			led_update(led_want(&d), 1);
 			d.t_meas = now;
 		}
-		if (d.ringing && now - d.t_ring_arm >= 1000) {
+		if (d.ringing && !d.silent && now - d.t_ring_arm >= 1000) {
 			fxsdev_ring_arm(&d.s, RING_ARM_MS);
 			d.t_ring_arm = now;
 		}

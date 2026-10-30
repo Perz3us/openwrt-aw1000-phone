@@ -94,6 +94,7 @@ int32_t si_iloop_ua(uint32_t raw);
 #define SI_DCFEED_WORDS 24
 #define SI_LF_OPEN 0
 #define SI_LF_FWD 1
+#define SI_LF_FWD_OHT 2
 #define SI_LF_RING 4
 #define SI_LF_REV_OHT 6
 

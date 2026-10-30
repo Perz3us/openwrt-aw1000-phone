@@ -30,8 +30,12 @@ Other things that work:
 - Speed dial: save a number under a code and dial `*1`, `*2` and so on
 - Blocked numbers, including hidden numbers if you want
 - The phone LED shows the line state: solid when ready, fast blink when a call comes in, slow
-  blink while the handset is off hook (each can be changed)
-- Line test in LuCI with line voltage, loop current and a button to ring the phone
+  blink while the handset is off hook (each can be changed). During NoobWRT's LED night mode
+  it stays dark and only blinks while a call rings
+- Do not disturb: the phone doesn't ring during set hours, calls still show in the history.
+  A second call from the same number within 3 minutes rings
+- Line test in LuCI with line voltage, loop current and a button to ring the phone. It also
+  warns when no phone seems to be plugged in (checked each time the phone rings)
 - Call history with search, filters, CSV export and optional auto delete
 
 Call waiting is in the code but did not work on my SIM, the network answers busy for the
@@ -56,10 +60,10 @@ there with scp) and install them:
 
 ```
 cd /tmp
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.5.0/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.5.0/fxsd-0.5.0-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.5.0/luci-app-fxs-0.5.0-r1.apk
-apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk /tmp/fxsd-0.5.0-r1.apk /tmp/luci-app-fxs-0.5.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.6.0/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.6.0/fxsd-0.6.0-r3.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.6.0/luci-app-fxs-0.6.0-r2.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk /tmp/fxsd-0.6.0-r3.apk /tmp/luci-app-fxs-0.6.0-r2.apk
 ```
 
 When updating, always update all three together (SIP calling needs the 0.3.0 driver). The old
@@ -68,7 +72,7 @@ kernel module stays loaded until it is removed, so stop fxsd and remove it befor
 ```
 /etc/init.d/fxsd stop
 rmmod aw1000_fxs
-apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk /tmp/fxsd-0.5.0-r1.apk /tmp/luci-app-fxs-0.5.0-r1.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk /tmp/fxsd-0.6.0-r3.apk /tmp/luci-app-fxs-0.6.0-r2.apk
 /etc/init.d/fxsd start
 ```
 
@@ -124,7 +128,7 @@ Call history, Settings, Speed dial and Blocked numbers. The same settings are in
 | `hd` | `0` | HD calling (16 kHz). Changing it restarts the modem, mobile data drops for about 30 seconds |
 | `sip` | `0` | SIP calling through QModem voice (experimental) |
 | `callerid` | `bellcore` | caller ID format: bellcore, etsi, dtmf or off |
-| `callerid_timing` | `after` | send caller ID `after` the first ring (North America) or `before` it (most of Europe) |
+| `callerid_timing` | `after` | send caller ID `after` the first ring (North America), `before` it (most of Europe), or `rpas`: a short ring, then the number, then normal ringing (some European phones, FSK only) |
 | `ring_pattern` | `standard` | how the phone rings: `standard` (2 s ring, 4 s pause), `short` (1 s, 4 s), `double` (UK and Australia) or `custom` |
 | `ring_on` | `2000` | ring time in ms for `custom` (200 to 8000) |
 | `ring_off` | `4000` | pause time in ms for `custom` (200 to 8000) |
@@ -133,6 +137,9 @@ Call history, Settings, Speed dial and Blocked numbers. The same settings are in
 | `led_ringing` | `fast` | LED while a call comes in |
 | `led_offhook` | `slow` | LED while the handset is off hook |
 | `block_private` | `0` | reject calls without a number |
+| `dnd` | `0` | do not disturb, the phone doesn't ring between `dnd_from` and `dnd_to` |
+| `dnd_from` | `22:00` | start of do not disturb |
+| `dnd_to` | `07:00` | end of do not disturb |
 | `history_autodelete` | `0` | delete old calls from the call history |
 | `history_days` | `30` | how many days of calls to keep when that is on |
 

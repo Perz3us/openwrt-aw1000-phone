@@ -10,6 +10,7 @@ return view.extend({
 
 		s = m.section(form.NamedSection, 'main', 'fxs');
 		s.tab('general', _('General'));
+		s.tab('dnd', _('Do not disturb'));
 		s.tab('history', _('Call history'));
 		s.tab('led', _('LED'));
 		s.tab('advanced', _('Advanced'));
@@ -62,6 +63,7 @@ return view.extend({
 			_('Most phones in North America expect the number after the first ring. Most phones in Europe expect it before the first ring, usually with FSK (ETSI) or DTMF.'));
 		o.value('after', _('After the first ring'));
 		o.value('before', _('Before the first ring'));
+		o.value('rpas', _('Short ring, then caller ID (RP-AS, FSK only)'));
 		o.default = 'after';
 		o.depends({ callerid: 'off', '!reverse': true });
 
@@ -82,6 +84,21 @@ return view.extend({
 		o.datatype = 'range(200,8000)';
 		o.placeholder = '4000';
 		o.depends('ring_pattern', 'custom');
+
+		o = s.taboption('dnd', form.Flag, 'dnd', _('Do not disturb'),
+			_('The RJ11 phone does not ring during these hours. Calls still show in the call history as missed, and SIP phones still ring. If the same number calls again within 3 minutes, the phone rings, so urgent calls get through.'));
+		o.default = '0';
+		o.rmempty = false;
+
+		[ [ 'dnd_from', _('From'), '22:00' ], [ 'dnd_to', _('Until'), '07:00' ] ].forEach(function(t) {
+			o = s.taboption('dnd', form.Value, t[0], t[1]);
+			o.placeholder = t[2];
+			o.default = t[2];
+			o.depends('dnd', '1');
+			o.validate = function(section_id, value) {
+				return !value || /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value) ? true : _('Enter a time like 22:00');
+			};
+		});
 
 		o = s.taboption('history', form.Flag, 'history_autodelete', _('Delete old calls'),
 			_('Remove calls from the call history once they are older than the number of days below.'));
@@ -112,7 +129,7 @@ return view.extend({
 		});
 
 		o = s.taboption('led', form.Value, 'led', _('LED'),
-			_('The AW1000 phone LED is green only. Leave empty to not use an LED. When the port is off the LED is off.'));
+			_('The AW1000 phone LED is green only. Leave empty to not use an LED. When the port is off the LED is off. During NoobWRT\'s LED night mode the phone LED stays dark and only blinks while a call rings.'));
 		o.placeholder = 'green:phone';
 
 		o = s.taboption('advanced', form.ListValue, 'channel', _('SLIC channel'),

@@ -145,6 +145,14 @@ function statusRows(st) {
 		rows.push([ _('SIP calling'), st.sip < 2 ? _('Waiting for QModem voice, the phone uses the modem directly') :
 			(st.sipcall ? _('On, a SIP phone is on a call') : _('On')) ]);
 
+	if (st.running && st.dnd)
+		rows.push([ _('Do not disturb'), st.silent ? _('On, a call is coming in without ringing') :
+			_('On, the phone does not ring. A second call from the same number within 3 minutes rings.') ]);
+
+	if (st.running)
+		rows.push([ _('Phone on the line'), st.phone === 1 ? _('Yes') : st.phone === 0 ?
+			_('Not found, check that a phone is plugged in') : _('Not checked yet. Press Ring the phone to check.') ]);
+
 	rows = rows.concat([
 		[ _('Number'), [ 'ringing', 'calling', 'talking' ].indexOf(st.state) >= 0 && st.peer ? st.peer : '-' ],
 		[ _('Service running'), yesno(st.running) ],
@@ -206,6 +214,9 @@ return view.extend({
 				E('p', _('Voice calls are turned off in the modem, so every call will fail. Run this on the router and restart the modem:')),
 				E('pre', 'ubus call at-daemon sendat \'{"at_port":"/dev/ttyUSB2","at_cmd":"AT+QCFG=\\"call_control\\",0,0","timeout":3}\'')
 			]);
+		if (st.running && st.phone === 0)
+			return E('div', { 'class': 'alert-message warning' },
+				E('p', _('No phone was found on the RJ11 port the last time it rang. Check that the phone is plugged in, then use Ring the phone to check again.')));
 		if (!st.guard || st.running)
 			return E('div');
 

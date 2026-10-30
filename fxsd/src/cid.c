@@ -23,7 +23,7 @@
 #define RAM_FSK01	838
 
 #define IRQ1_FSKBUF	0x40
-#define OMODE_STARTSTOP	0x80
+#define OMODE_FSK8	0x80
 
 struct fsk_cfg {
 	uint32_t freq[2], amp[2], tr[2];
@@ -31,12 +31,12 @@ struct fsk_cfg {
 };
 
 static const struct fsk_cfg bell202 = {
-	{ 0x06B60000, 0x079C0000 }, { 0x0015C000, 0x000BA000 }, { 0x02232000, 0x077C2000 },
+	{ 0x06B60000, 0x079C0000 }, { 0x00366000, 0x001D1000 }, { 0x02232000, 0x077C2000 },
 	30, 19,
 };
 
 static const struct fsk_cfg v23 = {
-	{ 0x06D20000, 0x078B0000 }, { 0x0014C000, 0x000CA000 }, { 0x026E4000, 0x0694C000 },
+	{ 0x06D20000, 0x078B0000 }, { 0x0033E000, 0x001F9000 }, { 0x026E4000, 0x0694C000 },
 	38, 23,
 };
 
@@ -137,10 +137,10 @@ static int fsk_send(struct slic *s, uint8_t ch, const struct fsk_cfg *c, const u
 	}
 	if ((e = s->rd(s->ctx, ch, SI_OMODE, &omode)))
 		return e;
-	omode = (omode & ~OMODE_STARTSTOP) | 0x0A;
+	omode = (omode & ~OMODE_FSK8) | 0x0A;
 	WR(SI_OCON, 0);
 	s->rd(s->ctx, ch, SI_IRQ1, &irq);
-	WR(SI_OMODE, omode);
+	WR(SI_OMODE, omode | OMODE_FSK8);
 	WR(SI_OCON, 0x05);
 
 	for (i = 0; i < c->seizure; i++)
@@ -151,7 +151,7 @@ static int fsk_send(struct slic *s, uint8_t ch, const struct fsk_cfg *c, const u
 			goto out;
 	if ((e = fsk_byte(s, ch, 0xFF)))
 		goto out;
-	WR(SI_OMODE, omode | OMODE_STARTSTOP);
+	WR(SI_OMODE, omode);
 	for (i = 0; i < (unsigned)n; i++)
 		if ((e = fsk_byte(s, ch, msg[i])))
 			goto out;
@@ -159,7 +159,7 @@ static int fsk_send(struct slic *s, uint8_t ch, const struct fsk_cfg *c, const u
 		s->delay(s->ctx, 20);
 out:
 	s->wr(s->ctx, ch, SI_OCON, 0);
-	s->wr(s->ctx, ch, SI_OMODE, omode & ~(OMODE_STARTSTOP | 0x08));
+	s->wr(s->ctx, ch, SI_OMODE, omode & ~0x08);
 	return e;
 }
 
@@ -260,6 +260,25 @@ int cid_send_before(struct slic *s, uint8_t ch, int mode, const char *number, co
 	}
 	e = cid_send(s, ch, mode, number, t);
 	s->delay(s->ctx, 200);
+out:
+	si_linefeed(s, ch, SI_LF_FWD);
+	return e;
+}
+
+int cid_send_rpas(struct slic *s, uint8_t ch, int mode, const char *number, const struct tm *t)
+{
+	int e;
+
+	if (mode == CID_OFF)
+		return 0;
+	if ((e = si_linefeed(s, ch, SI_LF_RING)))
+		return e;
+	s->delay(s->ctx, 250);
+	if ((e = si_linefeed(s, ch, SI_LF_FWD_OHT)))
+		goto out;
+	s->delay(s->ctx, 650);
+	e = cid_send(s, ch, mode, number, t);
+	s->delay(s->ctx, 250);
 out:
 	si_linefeed(s, ch, SI_LF_FWD);
 	return e;
