@@ -11,8 +11,9 @@ cd "$SDK"
 command -v make >/dev/null || { apt-get update -qq && apt-get install -y -qq make gcc g++ python3 file rsync libncurses-dev gawk unzip bzip2 xz-utils zstd bison flex >/dev/null; }
 command -v rsync >/dev/null || { apt-get update -qq && apt-get install -y -qq rsync gawk python3 file bison flex libncurses-dev >/dev/null; }
 
-echo "src-link aw1000 /work/openwrt" > feeds.conf
-./scripts/feeds update aw1000 >/dev/null
+{ grep -E '^src-git(-full)? (--root=package )?(base|packages|luci) ' feeds.conf.default; echo "src-link aw1000 /work/openwrt"; } > feeds.conf
+./scripts/feeds update -a >/dev/null
+./scripts/feeds install libubox ubus rpcd luci-base >/dev/null 2>&1
 ./scripts/feeds install -p aw1000 -a >/dev/null 2>&1 || true
 [ -f .config ] || make defconfig >/dev/null
 for p in kmod-aw1000-fxs fxsd luci-app-fxs; do

@@ -1,11 +1,12 @@
 #!/bin/sh
-# Builds an out-of-tree kernel module against the official OpenWrt 25.12.5
+# Builds an out-of-tree kernel module against the official OpenWrt (SDK_VER, default 25.12.5)
 # qualcommax/ipq807x SDK. Runs inside a Debian container; SDK is cached in /cache.
 #   build.sh <module dir> [official|noobwrt]
 # "noobwrt" = official kernel config + CONFIG_KALLSYMS=y (NoobWRT's struct module is 704 bytes).
 set -e
-SDK_NAME=openwrt-sdk-25.12.5-qualcommax-ipq807x_gcc-14.3.0_musl.Linux-x86_64
-SDK_URL=https://downloads.openwrt.org/releases/25.12.5/targets/qualcommax/ipq807x/$SDK_NAME.tar.zst
+SDK_VER=${SDK_VER:-25.12.5}
+SDK_NAME=openwrt-sdk-$SDK_VER-qualcommax-ipq807x_gcc-14.3.0_musl.Linux-x86_64
+SDK_URL=https://downloads.openwrt.org/releases/$SDK_VER/targets/qualcommax/ipq807x/$SDK_NAME.tar.zst
 MOD_DIR=${1:-/work/kernel/aw1000-fxs}
 FLAVOR=${2:-official}
 

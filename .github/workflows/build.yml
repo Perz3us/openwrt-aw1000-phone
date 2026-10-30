@@ -1,0 +1,116 @@
+name: Build
+
+on:
+  push:
+    tags: ['v*']
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+    inputs:
+      noobwrt:
+        description: NoobWRT release tag, empty for the latest
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.ref.outputs.ref }}
+      build: ${{ steps.ref.outputs.build }}
+      tag: ${{ steps.nw.outputs.tag }}
+      openwrt: ${{ steps.nw.outputs.openwrt }}
+      hash: ${{ steps.nw.outputs.hash }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y -qq squashfs-tools
+      - id: nw
+        env:
+          NOOBWRT: ${{ inputs.noobwrt }}
+        run: |
+          sh scripts/noobwrt_kernel.sh "$NOOBWRT" | tee -a "$GITHUB_OUTPUT"
+      - id: ref
+        env:
+          HASH: ${{ steps.nw.outputs.hash }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            echo "ref=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "build=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          REF=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          N=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq "[.[] | select(.draft or .tag_name == \"$REF\") | .assets[].name | select(contains(\"noobwrt-$(echo "$HASH" | cut -c1-8)\"))] | length")
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ "$N" = 0 ]; then
+            echo "build=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "$REF already has a kmod for this kernel"
+            echo "build=0" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.build == '1'
+    runs-on: ubuntu-latest
+    container: debian:bookworm
+    strategy:
+      matrix:
+        flavor: ${{ fromJSON(github.event_name == 'push' && '["noobwrt", "official"]' || '["noobwrt"]') }}
+    steps:
+      - run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends build-essential perl python3 python3-setuptools \
+            file rsync gawk unzip bzip2 xz-utils zstd bison flex libncurses-dev wget git ca-certificates \
+            swig gettext libelf-dev
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - env:
+          REF: ${{ needs.check.outputs.ref }}
+          SDK_VER: ${{ matrix.flavor == 'noobwrt' && needs.check.outputs.openwrt || '' }}
+          HASH: ${{ matrix.flavor == 'noobwrt' && needs.check.outputs.hash || '' }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git checkout "$REF" -- kernel openwrt fxsd
+          ln -s "$GITHUB_WORKSPACE" /work
+          mkdir -p /cache
+          [ -n "$SDK_VER" ] || unset SDK_VER
+          sh scripts/build.sh /work/kernel/aw1000-fxs ${{ matrix.flavor }}
+          sh scripts/build_pkgs.sh ${HASH:+"$HASH"}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.flavor }}
+          path: dist/*.apk
+
+  release:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REF: ${{ needs.check.outputs.ref }}
+      TAG: ${{ needs.check.outputs.tag }}
+      HASH: ${{ needs.check.outputs.hash }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: a
+      - run: |
+          mkdir out
+          H8=$(echo "$HASH" | cut -c1-8)
+          for f in a/noobwrt/kmod-*.apk; do
+            cp "$f" "out/$(basename "$f" .apk)-noobwrt-$H8.apk"
+          done
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            cp a/official/*.apk out/
+            gh release create "$REF" --repo "$GITHUB_REPOSITORY" --draft --title "$REF" --notes "" out/*.apk
+          else
+            gh release create "noobwrt-$TAG" --repo "$GITHUB_REPOSITORY" --draft --target main \
+              --title "Kernel module for NoobWRT $TAG" \
+              --notes "Kernel module from $REF built for NoobWRT $TAG (kernel ~$HASH). Install it with fxsd and luci-app-fxs from $REF." \
+              out/*.apk
+          fi
+          ls -l out
