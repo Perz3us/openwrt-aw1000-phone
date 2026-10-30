@@ -195,8 +195,9 @@ The Status page shows whether fxsd is connected to QModem voice. If QModem voice
 running, the RJ11 phone works on its own as before.
 
 In the SIP app (Linphone, Zoiper and so on) use the account name and password from step 1,
-domain `192.168.1.1` (your router's LAN address), port 5060, transport UDP. The phone has to
-be on the router's Wi-Fi or LAN. Keep the app running in the background or it can't ring.
+domain `192.168.1.1` (your router's LAN address), port 5060, transport UDP. In the app's audio
+codecs turn on PCMA or PCMU, other codecs don't work. The phone has to be on the router's
+Wi-Fi or LAN. Keep the app running in the background or it can't ring.
 If it was closed, open it while the RJ11 phone is ringing and the call shows up.
 
 FLASH (hold and call waiting) on the RJ11 phone doesn't work while it is on. Calls to and
