@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (C) 2026 perz3us
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 #include "cid.h"
 #include "si3226x.h"
@@ -49,6 +50,38 @@ static const uint32_t dtmf_amp[8] = {
 	0x00321000, 0x0037A000, 0x003E1000, 0x00451000,
 	0x005BB000, 0x00674000, 0x0074D000, 0x00853000,
 };
+
+static char loc_cc[8], loc_trunk[8], loc_intl[8];
+static int loc_on;
+
+void cid_local(const char *cc, const char *trunk, const char *intl)
+{
+	snprintf(loc_cc, sizeof(loc_cc), "%s", cc);
+	snprintf(loc_trunk, sizeof(loc_trunk), "%s", trunk);
+	snprintf(loc_intl, sizeof(loc_intl), "%s", intl);
+	loc_on = 1;
+}
+
+static const char *local_number(const char *in, char *out, size_t n)
+{
+	size_t li = strlen(loc_intl), lc = strlen(loc_cc), lt = strlen(loc_trunk);
+	const char *p;
+
+	if (*in == '+')
+		p = in + 1;
+	else if (li && !strncmp(in, loc_intl, li))
+		p = in + li;
+	else if (lt && strlen(in) >= 7 && strncmp(in, loc_trunk, lt) && strspn(in, "0123456789") == strlen(in)) {
+		snprintf(out, n, "%s%s", loc_trunk, in);
+		return out;
+	} else
+		return in;
+	if (lc && !strncmp(p, loc_cc, lc))
+		snprintf(out, n, "%s%s", loc_trunk, p + lc);
+	else
+		snprintf(out, n, "%s%s", loc_intl, p);
+	return out;
+}
 
 int cid_mode_parse(const char *s)
 {
@@ -222,9 +255,11 @@ static int dtmf_send(struct slic *s, uint8_t ch, const char *number)
 int cid_send(struct slic *s, uint8_t ch, int mode, const char *number, const struct tm *t)
 {
 	uint8_t msg[CID_MSG_MAX];
-	char num[21];
+	char num[21], loc[40];
 	int n = 0;
 
+	if (loc_on)
+		number = local_number(number, loc, sizeof(loc));
 	for (; *number && n < 20; number++)
 		if (*number >= '0' && *number <= '9')
 			num[n++] = *number;

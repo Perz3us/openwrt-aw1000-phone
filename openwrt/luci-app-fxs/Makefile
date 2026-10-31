@@ -4,7 +4,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-fxs
-PKG_VERSION:=0.6.0
+PKG_VERSION:=0.6.1
 PKG_RELEASE:=2
 PKG_LICENSE:=GPL-2.0-only
 PKG_MAINTAINER:=perz3us

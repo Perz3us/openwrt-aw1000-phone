@@ -67,6 +67,35 @@ return view.extend({
 		o.default = 'after';
 		o.depends({ callerid: 'off', '!reverse': true });
 
+		o = s.taboption('general', form.ListValue, 'callerid_format', _('Caller ID number'),
+			_('Caller ID can only send digits, so the + of a number is lost. Local shows numbers from your own country the way you dial them, and adds the international prefix (like 00) to other numbers. The call history always keeps the full number.'));
+		o.value('received', _('As received, without the +'));
+		o.value('local', _('Local'));
+		o.default = 'received';
+		o.depends({ callerid: 'off', '!reverse': true });
+
+		o = s.taboption('general', form.Value, 'callerid_country', _('Country code'),
+			_('Found from the SIM when set to auto. Enter it without the +, for example 94 or 351.'));
+		o.value('auto');
+		o.placeholder = 'auto';
+		o.default = 'auto';
+		o.depends('callerid_format', 'local');
+		o.validate = function(section_id, value) {
+			return !value || value == 'auto' || /^[0-9]{1,4}$/.test(value) ? true : _('Enter a country code like 94');
+		};
+
+		o = s.taboption('general', form.Value, 'callerid_prefix', _('Local prefix'),
+			_('The digit you dial before a local number instead of the country code, 0 in most countries. Use none if your country has no prefix, like Portugal or Italy.'));
+		o.value('auto');
+		o.value('none', _('none'));
+		o.value('0');
+		o.placeholder = 'auto';
+		o.default = 'auto';
+		o.depends('callerid_format', 'local');
+		o.validate = function(section_id, value) {
+			return !value || value == 'auto' || value == 'none' || /^[0-9]{1,3}$/.test(value) ? true : _('Enter digits, auto or none');
+		};
+
 		o = s.taboption('general', form.ListValue, 'ring_pattern', _('Ring pattern'),
 			_('How the phone rings for an incoming call. Use Ring the phone on the Status page to try it.'));
 		o.value('standard', _('Standard (2 s ring, 4 s pause)'));

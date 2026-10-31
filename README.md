@@ -24,7 +24,8 @@ Other things that work:
 
 - HD calling (16 kHz wideband audio), off by default, turn it on in Settings
 - SIP calling through QModem voice (experimental, off by default, see below)
-- Caller ID on phones with a display (FSK Bellcore, FSK ETSI or DTMF, before or after the first ring)
+- Caller ID on phones with a display (FSK Bellcore, FSK ETSI or DTMF, before or after the first ring).
+  Numbers can be shown the way you dial them, like 0771234567 instead of 94771234567
 - Ringing tone in the handset while the other side rings
 - Hold: press FLASH during a call, press it again to come back
 - Speed dial: save a number under a code and dial `*1`, `*2` and so on
@@ -50,8 +51,11 @@ tone are 425 Hz).
 - A SIM with voice calls (VoLTE)
 - The SLIC DSP patch file, see below
 
-The kernel module has to be built for the exact kernel your firmware uses. The packages in
-the release are for NoobWRT 25.12.5. For other firmware, build them yourself (see Building).
+The kernel module has to be built for the exact kernel your firmware uses. NoobWRT rj11 images
+already come with all three packages. The release has a kernel module for official OpenWrt
+25.12.5 and one for the latest NoobWRT, with the start of its kernel hash in the file name.
+Check yours with `apk list --installed kernel` (the part after `~`). For other firmware,
+build it yourself (see Building).
 
 ## Install
 
@@ -60,19 +64,20 @@ there with scp) and install them:
 
 ```
 cd /tmp
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.6.0/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.6.0/fxsd-0.6.0-r3.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.6.0/luci-app-fxs-0.6.0-r2.apk
-apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk /tmp/fxsd-0.6.0-r3.apk /tmp/luci-app-fxs-0.6.0-r2.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.6.1/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.6.1/fxsd-0.6.1-r4.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.6.1/luci-app-fxs-0.6.1-r2.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk /tmp/fxsd-0.6.1-r4.apk /tmp/luci-app-fxs-0.6.1-r2.apk
 ```
 
-When updating, always update all three together (SIP calling needs the 0.3.0 driver). The old
+On NoobWRT with the kernel module already installed (0.3.0), you only need fxsd and
+luci-app-fxs. Otherwise update all three together (SIP calling needs the 0.3.0 driver). The old
 kernel module stays loaded until it is removed, so stop fxsd and remove it before installing:
 
 ```
 /etc/init.d/fxsd stop
 rmmod aw1000_fxs
-apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk /tmp/fxsd-0.6.0-r3.apk /tmp/luci-app-fxs-0.6.0-r2.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk /tmp/fxsd-0.6.1-r4.apk /tmp/luci-app-fxs-0.6.1-r2.apk
 /etc/init.d/fxsd start
 ```
 
@@ -128,6 +133,9 @@ Call history, Settings, Speed dial and Blocked numbers. The same settings are in
 | `hd` | `0` | HD calling (16 kHz). Changing it restarts the modem, mobile data drops for about 30 seconds |
 | `sip` | `0` | SIP calling through QModem voice (experimental) |
 | `callerid` | `bellcore` | caller ID format: bellcore, etsi, dtmf or off |
+| `callerid_format` | `received` | `local` shows numbers from your own country the way you dial them and puts the international prefix (like 00) in front of other numbers. `received` sends the number without the + |
+| `callerid_country` | `auto` | your country code without the +, `auto` reads it from the SIM |
+| `callerid_prefix` | `auto` | the digit you dial before a local number, usually `0`. `none` for countries without one, like Portugal or Italy |
 | `callerid_timing` | `after` | send caller ID `after` the first ring (North America), `before` it (most of Europe), or `rpas`: a short ring, then the number, then normal ringing (some European phones, FSK only) |
 | `ring_pattern` | `standard` | how the phone rings: `standard` (2 s ring, 4 s pause), `short` (1 s, 4 s), `double` (UK and Australia) or `custom` |
 | `ring_on` | `2000` | ring time in ms for `custom` (200 to 8000) |

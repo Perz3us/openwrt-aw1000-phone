@@ -12,6 +12,7 @@
 #include "bringup.h"
 #include "cid.h"
 #include "clcc.h"
+#include "country.h"
 #include "fxsdev.h"
 #include "line.h"
 #include "modem.h"
@@ -604,7 +605,7 @@ static void test_ring_tick(struct fxsd *d, unsigned long now)
 
 static void read_own_number(void)
 {
-	char r[256];
+	char r[1024];
 	const char *p;
 	size_t n = 0;
 
@@ -617,9 +618,51 @@ static void read_own_number(void)
 	own_number[n] = 0;
 }
 
+static int digits(const char *s)
+{
+	for (; *s; s++)
+		if (*s < '0' || *s > '9')
+			return 0;
+	return 1;
+}
+
+static void local_numbers(const char *opt)
+{
+	char cc[8] = "", tr[8] = "auto", r[1024];
+	const struct country *c = NULL;
+	const char *p;
+
+	if (!opt || sscanf(opt, "%7[^,],%7s", cc, tr) < 1 || !strcmp(cc, "off"))
+		return;
+	if (!modem_at("AT+CIMI", r, sizeof(r)) && (p = strstr(r, "\"response\""))) {
+		for (; *p && !(p[0] >= '0' && p[0] <= '9' && p[1] >= '0' && p[1] <= '9' &&
+				    p[2] >= '0' && p[2] <= '9'); p++)
+			;
+		if (*p)
+			c = country_find((p[0] - '0') * 100 + (p[1] - '0') * 10 + (p[2] - '0'));
+	}
+	if (!strcmp(cc, "auto")) {
+		if (!c) {
+			msg(LOG_WARNING, "could not find the country of the SIM, set it in Settings to show local numbers");
+			return;
+		}
+		snprintf(cc, sizeof(cc), "%s", c->cc);
+	}
+	if (!strcmp(tr, "auto"))
+		snprintf(tr, sizeof(tr), "%s", c && !strcmp(c->cc, cc) ? c->trunk : "0");
+	else if (!strcmp(tr, "none"))
+		*tr = 0;
+	if (!digits(cc) || !digits(tr)) {
+		msg(LOG_WARNING, "bad caller ID country or local prefix");
+		return;
+	}
+	cid_local(cc, tr, c && !strcmp(c->cc, cc) ? c->intl : "00");
+	msg(LOG_INFO, "caller ID shows local numbers for +%s", cc);
+}
+
 static void check_voice(void)
 {
-	char r[256];
+	char r[1024];
 	const char *p;
 
 	if (modem_at("AT+QCFG=\"call_control\"", r, sizeof(r)) || !(p = strstr(r, "+QCFG:")) ||
@@ -908,7 +951,7 @@ static int usage(void)
 
 int main(int argc, char **argv)
 {
-	const char *patch = NULL;
+	const char *patch = NULL, *numfmt = NULL;
 	struct fxsd d = { .ch = 1, .cid_mode = CID_BELLCORE, .phone = -1 };
 	struct si_patch p;
 	unsigned long t_modem = 0, t_hook = 0, t_ready, t_prune, t_voip, t_urc, t_alive = 0;
@@ -918,7 +961,7 @@ int main(int argc, char **argv)
 	int ringback = 1, hd = 0;
 	char r[512];
 
-	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:s:n:q:fv")) != -1) {
+	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:s:n:q:u:fv")) != -1) {
 		switch (o) {
 		case 'p': patch = optarg; break;
 		case 'c': d.ch = atoi(optarg) & 1; break;
@@ -936,6 +979,7 @@ int main(int argc, char **argv)
 		case 's': sip_on = atoi(optarg) == 1; break;
 		case 'n': ring_parse(optarg); break;
 		case 'q': dnd_parse(optarg); break;
+		case 'u': numfmt = optarg; break;
 		case 'f': fg = 1; break;
 		case 'v': d.verbose = 1; break;
 		default: return usage();
@@ -968,6 +1012,7 @@ int main(int argc, char **argv)
 	if (q >= 0 && d.wb != hd)
 		msg(LOG_WARNING, "modem audio is still %s kHz, could not change it", d.wb ? "16" : "8");
 	read_own_number();
+	local_numbers(numfmt);
 	check_voice();
 	if (vol >= 0 && vol <= 5) {
 		snprintf(r, sizeof(r), "AT+CLVL=%d", vol);

@@ -13,6 +13,7 @@ enum cid_mode { CID_OFF, CID_BELLCORE, CID_ETSI, CID_DTMF };
 #define CID_MSG_MAX 64
 
 int cid_mode_parse(const char *s);
+void cid_local(const char *cc, const char *trunk, const char *intl);
 int cid_mdmf(const char *number, const struct tm *t, uint8_t *out, size_t max);
 int cid_send(struct slic *s, uint8_t ch, int mode, const char *number, const struct tm *t);
 int cid_send_before(struct slic *s, uint8_t ch, int mode, const char *number, const struct tm *t);
