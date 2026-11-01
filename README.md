@@ -54,7 +54,9 @@ tone are 425 Hz).
 
 The kernel module has to be built for the exact kernel your firmware uses. NoobWRT rj11 images
 already come with all three packages. The release has a kernel module for official OpenWrt
-25.12.5 and one for the latest NoobWRT, with the start of its kernel hash in the file name.
+25.12.5 and one for the latest NoobWRT, with the start of its kernel hash in the file name. When
+a new official OpenWrt or NoobWRT kernel comes out, its kernel module is added as a separate
+release named after it.
 Check yours with `apk list --installed kernel` (the part after `~`). For other firmware,
 build it yourself (see Building).
 
@@ -65,10 +67,10 @@ there with scp) and install them:
 
 ```
 cd /tmp
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.6.1/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.6.1/fxsd-0.6.1-r4.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.6.1/luci-app-fxs-0.6.1-r2.apk
-apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk /tmp/fxsd-0.6.1-r4.apk /tmp/luci-app-fxs-0.6.1-r2.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.7.0/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.7.0/fxsd-0.7.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.7.0/luci-app-fxs-0.7.0-r1.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk /tmp/fxsd-0.7.0-r1.apk /tmp/luci-app-fxs-0.7.0-r1.apk
 ```
 
 On NoobWRT with the kernel module already installed (0.3.0), you only need fxsd and
@@ -78,7 +80,7 @@ kernel module stays loaded until it is removed, so stop fxsd and remove it befor
 ```
 /etc/init.d/fxsd stop
 rmmod aw1000_fxs
-apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk /tmp/fxsd-0.6.1-r4.apk /tmp/luci-app-fxs-0.6.1-r2.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.3.0-r1.apk /tmp/fxsd-0.7.0-r1.apk /tmp/luci-app-fxs-0.7.0-r1.apk
 /etc/init.d/fxsd start
 ```
 

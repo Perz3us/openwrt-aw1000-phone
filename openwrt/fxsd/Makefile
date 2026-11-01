@@ -4,8 +4,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=fxsd
-PKG_VERSION:=0.6.1
-PKG_RELEASE:=9
+PKG_VERSION:=0.7.0
+PKG_RELEASE:=1
 PKG_LICENSE:=GPL-2.0-only
 PKG_MAINTAINER:=perz3us
 
