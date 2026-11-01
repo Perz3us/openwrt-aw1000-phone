@@ -45,7 +45,7 @@ return view.extend({
 		o.rmempty = false;
 
 		o = s.taboption('general', form.Flag, 'sip', _('SIP calling (experimental)'),
-			_('Lets SIP phones and apps make and answer calls through the SIM, next to the RJ11 phone. It needs QModem voice (qmodem-voip and qmodem-sipd, with at-daemon 3.4.0 or newer) set up and turned on in QModem. Until QModem voice is running, the RJ11 phone keeps working as before.') + '<br /><strong>' +
+			_('Lets SIP phones and apps make and answer calls through the SIM, next to the RJ11 phone. It needs QModem voice (qmodem-voip and qmodem-sipd, with at-daemon 3.4.0 or newer) set up and turned on in QModem. Until QModem voice is running, the RJ11 phone keeps working as before. To use only SIP phones, turn the phone port off on the Status page.') + '<br /><strong>' +
 			_('Warning: this is still being tested. Calls may drop or have no sound, and call waiting (flash) on the RJ11 phone does not work while it is on. If something goes wrong, turn it off and report it on') +
 			' <a href="https://github.com/Perz3us/openwrt-aw1000-phone/issues" target="_blank" rel="noreferrer">GitHub</a>.</strong>');
 		o.default = '0';
@@ -115,19 +115,39 @@ return view.extend({
 		o.depends('ring_pattern', 'custom');
 
 		o = s.taboption('dnd', form.Flag, 'dnd', _('Do not disturb'),
-			_('The RJ11 phone does not ring during these hours. Calls still show in the call history as missed, and SIP phones still ring. If the same number calls again within 3 minutes, the phone rings, so urgent calls get through.'));
+			_('The RJ11 phone does not ring during these hours. Calls still show in the call history as missed, and SIP phones still ring. Numbers in the allowed list always ring.'));
 		o.default = '0';
 		o.rmempty = false;
+
+		o = s.taboption('dnd', form.Flag, 'dnd_allday', _('All day'),
+			_('Keep do not disturb on all the time instead of only during set hours.'));
+		o.default = '0';
+		o.depends('dnd', '1');
 
 		[ [ 'dnd_from', _('From'), '22:00' ], [ 'dnd_to', _('Until'), '07:00' ] ].forEach(function(t) {
 			o = s.taboption('dnd', form.Value, t[0], t[1]);
 			o.placeholder = t[2];
 			o.default = t[2];
-			o.depends('dnd', '1');
+			o.depends({ dnd: '1', dnd_allday: '0' });
 			o.validate = function(section_id, value) {
 				return !value || /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value) ? true : _('Enter a time like 22:00');
 			};
 		});
+
+		o = s.taboption('dnd', form.Value, 'dnd_repeat', _('Ring on a repeat call within (minutes)'),
+			_('If the same number calls again within this time, the phone rings, so urgent calls get through. 0 turns this off.'));
+		o.datatype = 'range(0,60)';
+		o.placeholder = '3';
+		o.default = '3';
+		o.depends('dnd', '1');
+
+		o = s.taboption('dnd', form.DynamicList, 'dnd_allow', _('Always ring for'),
+			_('Calls from these numbers ring even during do not disturb.'));
+		o.placeholder = '0771234567';
+		o.depends('dnd', '1');
+		o.validate = function(section_id, value) {
+			return !value || /^\+?[0-9]{3,20}$/.test(value) ? true : _('Enter a phone number');
+		};
 
 		o = s.taboption('history', form.Flag, 'history_autodelete', _('Delete old calls'),
 			_('Remove calls from the call history once they are older than the number of days below.'));

@@ -37,10 +37,10 @@
 #define LED_NIGHT	"/tmp/led-night-active"
 #define SPEED_FILE	"/var/run/fxsd.speed"
 #define BLOCK_FILE	"/var/run/fxsd.block"
+#define ALLOW_FILE	"/var/run/fxsd.allow"
 #define LIST_MAX	32
 #define PCM_SOCK	"/var/run/fxsd/pcm.sock"
 #define VOIP_CHECK_MS	5000
-#define DND_REPEAT_S	180
 #define RING_PHONE_UA	2200
 
 struct fxsd {
@@ -68,9 +68,12 @@ enum { LED_READY, LED_RINGING, LED_OFFHOOK };
 static int led_mode[3] = { LED_ON, LED_FAST, LED_SLOW };
 static int led_cur = -1;
 static int keep_days;
-static int dnd_from = -1, dnd_to = -1;
+static int dnd_from = -1, dnd_to = -1, dnd_repeat = 180;
+static struct { char code[4]; char num[CLCC_NUM_MAX]; } speed[LIST_MAX];
+static char block[LIST_MAX][CLCC_NUM_MAX], allow[LIST_MAX][CLCC_NUM_MAX];
+static int nspeed, nblock, nallow;
 static int voice_off;
-static int sip_on, client;
+static int sip_on, client, phone_off;
 
 static void on_sig(int sig)
 {
@@ -168,6 +171,8 @@ static void led_update(int mode, int verify)
 
 static int led_want(const struct fxsd *d)
 {
+	if (phone_off)
+		return LED_OFF;
 	if (d->ringing || d->test_ring)
 		return led_mode[LED_RINGING];
 	if (!access(LED_NIGHT, F_OK))
@@ -230,11 +235,23 @@ static int dnd_now(void)
 	struct tm tm;
 	int m;
 
-	if (dnd_from < 0 || dnd_from == dnd_to)
+	if (dnd_from < 0)
 		return 0;
+	if (dnd_from == dnd_to)
+		return 1;
 	localtime_r(&t, &tm);
 	m = tm.tm_hour * 60 + tm.tm_min;
 	return dnd_from < dnd_to ? m >= dnd_from && m < dnd_to : m >= dnd_from || m < dnd_to;
+}
+
+static int dnd_allowed(const char *num)
+{
+	int i;
+
+	for (i = 0; *num && i < nallow; i++)
+		if (same_number(num, allow[i]))
+			return 1;
+	return 0;
 }
 
 static int dnd_silence(struct fxsd *d)
@@ -245,9 +262,13 @@ static int dnd_silence(struct fxsd *d)
 
 	if (d->test_ring || d->line.recall || !dnd_now())
 		return 0;
-	if (*d->line.peer && *last && same_number(last, d->line.peer) && now - t_last < DND_REPEAT_S) {
+	if (dnd_allowed(d->line.peer)) {
+		msg(LOG_INFO, "do not disturb, allowed number, ringing");
+		return 0;
+	}
+	if (dnd_repeat && *d->line.peer && *last && same_number(last, d->line.peer) && now - t_last < dnd_repeat) {
 		*last = 0;
-		msg(LOG_INFO, "second call within %d minutes, ringing", DND_REPEAT_S / 60);
+		msg(LOG_INFO, "second call within %d min, ringing", dnd_repeat / 60);
 		return 0;
 	}
 	snprintf(last, sizeof(last), "%s", d->line.peer);
@@ -289,7 +310,7 @@ static void op_ring(void *c, int on)
 	struct fxsd *d = c;
 	uint8_t lf;
 
-	if (on && (d->silent = dnd_silence(d))) {
+	if (on && (d->silent = phone_off || dnd_silence(d))) {
 		d->ringing = 1;
 		d->cid_pending = 0;
 		return;
@@ -415,10 +436,6 @@ static void op_chld(void *c, const char *arg)
 	at(cmd);
 }
 
-static struct { char code[4]; char num[CLCC_NUM_MAX]; } speed[LIST_MAX];
-static char block[LIST_MAX][CLCC_NUM_MAX];
-static int nspeed, nblock;
-
 static void load_lists(void)
 {
 	char buf[96];
@@ -434,6 +451,12 @@ static void load_lists(void)
 		while (nblock < LIST_MAX && fgets(buf, sizeof(buf), f))
 			if (sscanf(buf, "%31s", block[nblock]) == 1)
 				nblock++;
+		fclose(f);
+	}
+	if ((f = fopen(ALLOW_FILE, "r"))) {
+		while (nallow < LIST_MAX && fgets(buf, sizeof(buf), f))
+			if (sscanf(buf, "%31s", allow[nallow]) == 1)
+				nallow++;
 		fclose(f);
 	}
 }
@@ -586,7 +609,7 @@ static void test_ring_tick(struct fxsd *d, unsigned long now)
 		ring_test = 0;
 		if (d->test_ring) {
 			stop_test = 1;
-		} else if (d->line.state == LS_IDLE && !d->ringing && !d->line.offhook) {
+		} else if (!phone_off && d->line.state == LS_IDLE && !d->ringing && !d->line.offhook) {
 			d->test_ring = 1;
 			op_ring(d, 1);
 			d->cid_pending = 0;
@@ -634,7 +657,7 @@ static void local_numbers(const char *opt)
 
 	if (!opt || sscanf(opt, "%7[^,],%7s", cc, tr) < 1 || !strcmp(cc, "off"))
 		return;
-	if (!modem_at("AT+CIMI", r, sizeof(r)) && (p = strstr(r, "\"response\""))) {
+	if (!modem_at("AT+CIMI", r, sizeof(r)) && ((p = strstr(r, "\"response\"")) || (p = strstr(r, "\n")))) {
 		for (; *p && !(p[0] >= '0' && p[0] <= '9' && p[1] >= '0' && p[1] <= '9' &&
 				    p[2] >= '0' && p[2] <= '9'); p++)
 			;
@@ -686,7 +709,7 @@ static int wait_modem(int hd)
 		q = modem_at("AT+QDAI?", r, sizeof(r)) ? -1 : qdai_is_slave(r);
 		if (q == 1)
 			return 0;
-		if (q < 0 && modem_port_ok() && ++fails >= 10) {
+		if (q < 0 && modem_port_ok() && !modem_direct() && ++fails >= 10) {
 			msg(LOG_WARNING, "at-daemon does not answer, restarting it");
 			modem_heal();
 			fails = -10;
@@ -759,7 +782,7 @@ static void check_hook(struct fxsd *d, unsigned long now)
 {
 	uint8_t lcr;
 
-	if (!d->s.rd(d->s.ctx, d->ch, SI_LCRRTP, &lcr))
+	if (!phone_off && !d->s.rd(d->s.ctx, d->ch, SI_LCRRTP, &lcr))
 		line_hook(&d->line, !!(lcr & 2), now);
 }
 
@@ -831,12 +854,15 @@ static void ring_cad_tick(struct fxsd *d, unsigned long now)
 
 static void dnd_parse(const char *s)
 {
-	unsigned int h1, m1, h2, m2;
+	unsigned int h1, m1, h2, m2, rep;
+	int n = sscanf(s, "%u:%u,%u:%u,%u", &h1, &m1, &h2, &m2, &rep);
 
-	if (sscanf(s, "%u:%u,%u:%u", &h1, &m1, &h2, &m2) != 4 || h1 > 23 || h2 > 23 || m1 > 59 || m2 > 59)
+	if (n < 4 || h1 > 23 || h2 > 23 || m1 > 59 || m2 > 59)
 		return;
 	dnd_from = h1 * 60 + m1;
 	dnd_to = h2 * 60 + m2;
+	if (n == 5 && rep <= 60)
+		dnd_repeat = rep * 60;
 }
 
 static void ring_parse(const char *s)
@@ -945,7 +971,7 @@ static int setup(struct fxsd *d, const struct si_patch *p, int gtx, int grx)
 
 static int usage(void)
 {
-	fprintf(stderr, "usage: fxsd -p PATCH [-c CHANNEL] [-g TXDB,RXDB] [-a ATPORT] [-l VOLUME] [-r RXGAIN] [-e LED] [-m READY,RINGING,OFFHOOK] [-b 0|1] [-i bellcore|etsi|dtmf|off] [-t before|after] [-k DAYS] [-w 0|1] [-s 0|1] [-n ON,OFF[,ON,OFF]] [-f] [-v]\n");
+	fprintf(stderr, "usage: fxsd -p PATCH [-c CHANNEL] [-g TXDB,RXDB] [-a ATPORT] [-l VOLUME] [-r RXGAIN] [-e LED] [-m READY,RINGING,OFFHOOK] [-b 0|1] [-i bellcore|etsi|dtmf|off] [-t before|after] [-k DAYS] [-w 0|1] [-s 0|1] [-n ON,OFF[,ON,OFF]] [-o] [-f] [-v]\n");
 	return 2;
 }
 
@@ -961,7 +987,7 @@ int main(int argc, char **argv)
 	int ringback = 1, hd = 0;
 	char r[512];
 
-	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:s:n:q:u:fv")) != -1) {
+	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:s:n:q:u:ofv")) != -1) {
 		switch (o) {
 		case 'p': patch = optarg; break;
 		case 'c': d.ch = atoi(optarg) & 1; break;
@@ -980,6 +1006,7 @@ int main(int argc, char **argv)
 		case 'n': ring_parse(optarg); break;
 		case 'q': dnd_parse(optarg); break;
 		case 'u': numfmt = optarg; break;
+		case 'o': phone_off = 1; break;
 		case 'f': fg = 1; break;
 		case 'v': d.verbose = 1; break;
 		default: return usage();
@@ -1031,6 +1058,8 @@ int main(int argc, char **argv)
 		goto out;
 	}
 	si_patch_free(&p);
+	if (phone_off)
+		si_linefeed(&d.s, d.ch, SI_LF_OPEN);
 	load_lists();
 	ops.ctx = &d;
 	line_init(&d.line, &ops);
@@ -1040,8 +1069,8 @@ int main(int argc, char **argv)
 		sip_on = 0;
 		e = 0;
 	}
-	msg(LOG_INFO, "ready on channel %u, modem AT port %s%s", d.ch, modem_port(),
-	    sip_on ? ", SIP calling on (experimental)" : "");
+	msg(LOG_INFO, "ready on channel %u, modem AT port %s%s%s", d.ch, modem_port(),
+	    sip_on ? ", SIP calling on (experimental)" : "", phone_off ? ", phone port off" : "");
 	trim_log();
 	led_update(led_want(&d), 0);
 	t_ready = now_ms();

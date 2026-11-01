@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 #include "modem.h"
 
@@ -120,36 +121,52 @@ static int replug(void)
 	return write_file(auth, "1");
 }
 
-static int at_ready(const char *tty)
+static long ms_now(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return ts.tv_sec * 1000L + ts.tv_nsec / 1000000;
+}
+
+static int at_direct(const char *tty, const char *cmd, char *resp, size_t n, int ms)
 {
 	struct termios t;
 	struct pollfd pf;
-	char buf[128];
-	size_t got = 0;
+	size_t got = 0, len = strlen(cmd);
+	long end = ms_now() + ms, left;
 	ssize_t k;
-	int fd, ok = 0;
+	int fd, done = 0;
 
-	if ((fd = open(tty, O_RDWR | O_NOCTTY | O_NONBLOCK)) < 0)
-		return 0;
+	if (n < 2 || (fd = open(tty, O_RDWR | O_NOCTTY | O_NONBLOCK)) < 0)
+		return -1;
 	if (!tcgetattr(fd, &t)) {
 		cfmakeraw(&t);
 		cfsetspeed(&t, B115200);
 		tcsetattr(fd, TCSANOW, &t);
 	}
 	tcflush(fd, TCIOFLUSH);
-	if (write(fd, "AT\r", 3) == 3) {
+	resp[0] = 0;
+	if (write(fd, cmd, len) == (ssize_t)len && write(fd, "\r", 1) == 1) {
 		pf.fd = fd;
 		pf.events = POLLIN;
-		while (!ok && got + 1 < sizeof(buf) && poll(&pf, 1, 1000) > 0) {
-			if ((k = read(fd, buf + got, sizeof(buf) - 1 - got)) <= 0)
+		while (!done && got + 1 < n && (left = end - ms_now()) > 0 && poll(&pf, 1, left) > 0) {
+			if ((k = read(fd, resp + got, n - 1 - got)) <= 0)
 				break;
 			got += k;
-			buf[got] = 0;
-			ok = strstr(buf, "OK") != NULL;
+			resp[got] = 0;
+			done = strstr(resp, "OK\r\n") || strstr(resp, "ERROR");
 		}
 	}
 	close(fd);
-	return ok;
+	return done ? 0 : -1;
+}
+
+static int at_ready(const char *tty)
+{
+	char buf[128];
+
+	return !at_direct(tty, "AT", buf, sizeof(buf), 1000) && strstr(buf, "OK");
 }
 
 static int wait_back(int secs)
@@ -219,6 +236,11 @@ int modem_data_up(void)
 	return up;
 }
 
+int modem_direct(void)
+{
+	return access(AT_DAEMON, X_OK) != 0;
+}
+
 int modem_at(const char *cmd, char *resp, size_t n)
 {
 	const char *ap = port();
@@ -226,6 +248,8 @@ int modem_at(const char *cmd, char *resp, size_t n)
 	size_t got, k = 0;
 	FILE *p;
 
+	if (*ap && modem_direct())
+		return at_direct(ap, cmd, resp, n, 3000);
 	if (!*ap || strpbrk(cmd, "'\\") || strpbrk(ap, "'\"\\"))
 		return -1;
 	for (; *cmd && k + 3 < sizeof(esc); cmd++) {

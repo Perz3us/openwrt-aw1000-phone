@@ -34,7 +34,7 @@ Other things that work:
   blink while the handset is off hook (each can be changed). During NoobWRT's LED night mode
   it stays dark and only blinks while a call rings
 - Do not disturb: the phone doesn't ring during set hours, calls still show in the history.
-  A second call from the same number within 3 minutes rings
+  A second call from the same number within a few minutes rings, and you can add numbers that always ring
 - Line test in LuCI with line voltage, loop current and a button to ring the phone. It also
   warns when no phone seems to be plugged in (checked each time the phone rings)
 - Call history with search, filters, CSV export and optional auto delete
@@ -47,7 +47,8 @@ tone are 425 Hz).
 
 - AW1000 with the Quectel RG500Q-EA modem
 - OpenWrt 25.12. I use [NoobWRT](https://github.com/nooblk-98/noobwrt-arcadyan-aw1k) 25.12.5
-- QModem (fxsd sends AT commands through its at-daemon)
+- QModem is optional. With it fxsd sends AT commands through its at-daemon, without it fxsd
+  talks to the modem AT port itself. SIP calling needs QModem voice
 - A SIM with voice calls (VoLTE)
 - The SLIC DSP patch file, see below
 
@@ -120,7 +121,7 @@ Call history, Settings, Speed dial and Blocked numbers. The same settings are in
 
 | Option | Default | |
 |---|---|---|
-| `enabled` | `1` | turn the port on or off |
+| `enabled` | `1` | turn the port on or off. With `sip` on, turning it off keeps SIP calling working without the RJ11 phone |
 | `own_number` | | your number, shown on the Status page |
 | `tx_gain` | `-6` | your voice level to the other side (dB) |
 | `rx_gain` | `0` | the other side's level to your phone (dB) |
@@ -148,6 +149,9 @@ Call history, Settings, Speed dial and Blocked numbers. The same settings are in
 | `dnd` | `0` | do not disturb, the phone doesn't ring between `dnd_from` and `dnd_to` |
 | `dnd_from` | `22:00` | start of do not disturb |
 | `dnd_to` | `07:00` | end of do not disturb |
+| `dnd_allday` | `0` | do not disturb all the time, `dnd_from` and `dnd_to` are ignored |
+| `dnd_repeat` | `3` | minutes, a second call from the same number within this time rings anyway, 0 turns it off |
+| `dnd_allow` | | list of numbers that always ring during do not disturb |
 | `history_autodelete` | `0` | delete old calls from the call history |
 | `history_days` | `30` | how many days of calls to keep when that is on |
 

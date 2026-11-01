@@ -7,6 +7,7 @@
 
 void modem_set_port(const char *port);
 int modem_at(const char *cmd, char *resp, size_t n);
+int modem_direct(void);
 const char *modem_port(void);
 int modem_port_ok(void);
 int modem_restart(void);

@@ -10,6 +10,9 @@ on:
       noobwrt:
         description: NoobWRT release tag, empty for the latest
         required: false
+      openwrt:
+        description: Official OpenWrt version, empty for the latest stable
+        required: false
 
 permissions:
   contents: write
@@ -19,47 +22,64 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ref: ${{ steps.ref.outputs.ref }}
-      build: ${{ steps.ref.outputs.build }}
+      flavors: ${{ steps.ref.outputs.flavors }}
       tag: ${{ steps.nw.outputs.tag }}
       openwrt: ${{ steps.nw.outputs.openwrt }}
       hash: ${{ steps.nw.outputs.hash }}
+      ow_version: ${{ steps.ow.outputs.version }}
+      ow_kernel: ${{ steps.ow.outputs.kernel }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - run: sudo apt-get install -y -qq squashfs-tools
       - id: nw
         env:
           NOOBWRT: ${{ inputs.noobwrt }}
         run: |
           sh scripts/noobwrt_kernel.sh "$NOOBWRT" | tee -a "$GITHUB_OUTPUT"
+      - id: ow
+        env:
+          OPENWRT: ${{ inputs.openwrt }}
+        run: |
+          sh scripts/official_kernel.sh "$OPENWRT" | tee -a "$GITHUB_OUTPUT"
       - id: ref
         env:
           HASH: ${{ steps.nw.outputs.hash }}
+          OW: ${{ steps.ow.outputs.version }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = push ]; then
             echo "ref=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
-            echo "build=1" >> "$GITHUB_OUTPUT"
+            echo 'flavors=["noobwrt","official"]' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           REF=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
-          N=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq "[.[] | select(.draft or .tag_name == \"$REF\") | .assets[].name | select(contains(\"noobwrt-$(echo "$HASH" | cut -c1-8)\"))] | length")
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ "$N" = 0 ]; then
-            echo "build=1" >> "$GITHUB_OUTPUT"
+          ASSETS=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.draft or .tag_name == \"$REF\") | .assets[].name")
+          SDK=$(git show "$REF:scripts/build.sh" | sed -n 's/^SDK_VER=.*:-\([0-9.]*\)}$/\1/p')
+          F=
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || ! echo "$ASSETS" | grep -q "noobwrt-$(echo "$HASH" | cut -c1-8)"; then
+            F='"noobwrt"'
           else
-            echo "$REF already has a kmod for this kernel"
-            echo "build=0" >> "$GITHUB_OUTPUT"
+            echo "$REF already has a kmod for this NoobWRT kernel"
           fi
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || { [ "$OW" != "$SDK" ] && ! echo "$ASSETS" | grep -q "openwrt-$OW"; }; then
+            F="${F:+$F,}\"official\""
+          else
+            echo "$REF already has a kmod for OpenWrt $OW"
+          fi
+          echo "flavors=[$F]" >> "$GITHUB_OUTPUT"
 
   build:
     needs: check
-    if: needs.check.outputs.build == '1'
+    if: needs.check.outputs.flavors != '[]'
     runs-on: ubuntu-latest
     container: debian:bookworm
     strategy:
       matrix:
-        flavor: ${{ fromJSON(github.event_name == 'push' && '["noobwrt", "official"]' || '["noobwrt"]') }}
+        flavor: ${{ fromJSON(needs.check.outputs.flavors) }}
     steps:
       - run: |
           apt-get update -qq
@@ -71,7 +91,7 @@ jobs:
           fetch-depth: 0
       - env:
           REF: ${{ needs.check.outputs.ref }}
-          SDK_VER: ${{ matrix.flavor == 'noobwrt' && needs.check.outputs.openwrt || '' }}
+          SDK_VER: ${{ matrix.flavor == 'noobwrt' && needs.check.outputs.openwrt || (github.event_name != 'push' && needs.check.outputs.ow_version || '') }}
           HASH: ${{ matrix.flavor == 'noobwrt' && needs.check.outputs.hash || '' }}
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -94,23 +114,41 @@ jobs:
       REF: ${{ needs.check.outputs.ref }}
       TAG: ${{ needs.check.outputs.tag }}
       HASH: ${{ needs.check.outputs.hash }}
+      OW: ${{ needs.check.outputs.ow_version }}
+      OWK: ${{ needs.check.outputs.ow_kernel }}
     steps:
       - uses: actions/download-artifact@v8
         with:
           path: a
       - run: |
-          mkdir out
           H8=$(echo "$HASH" | cut -c1-8)
-          for f in a/noobwrt/kmod-*.apk; do
-            cp "$f" "out/$(basename "$f" .apk)-noobwrt-$H8.apk"
-          done
           if [ "$GITHUB_EVENT_NAME" = push ]; then
+            mkdir out
+            for f in a/noobwrt/kmod-*.apk; do
+              cp "$f" "out/$(basename "$f" .apk)-noobwrt-$H8.apk"
+            done
             cp a/official/*.apk out/
             gh release create "$REF" --repo "$GITHUB_REPOSITORY" --draft --title "$REF" --notes "" out/*.apk
-          else
+            exit 0
+          fi
+          if [ -d a/noobwrt ]; then
+            mkdir nw
+            for f in a/noobwrt/kmod-*.apk; do
+              cp "$f" "nw/$(basename "$f" .apk)-noobwrt-$H8.apk"
+            done
             gh release create "noobwrt-$TAG" --repo "$GITHUB_REPOSITORY" --draft --target main \
               --title "Kernel module for NoobWRT $TAG" \
               --notes "Kernel module from $REF built for NoobWRT $TAG (kernel ~$HASH). Install it with fxsd and luci-app-fxs from $REF." \
-              out/*.apk
+              nw/*.apk
           fi
-          ls -l out
+          if [ -d a/official ]; then
+            mkdir ow
+            for f in a/official/kmod-*.apk; do
+              cp "$f" "ow/$(basename "$f" .apk)-openwrt-$OW.apk"
+            done
+            gh release create "openwrt-$OW" --repo "$GITHUB_REPOSITORY" --draft --target main \
+              --title "Kernel module for OpenWrt $OW" \
+              --notes "Kernel module from $REF built for official OpenWrt $OW (kernel $OWK). Install it with fxsd and luci-app-fxs from $REF." \
+              ow/*.apk
+          fi
+          ls -l nw ow 2>/dev/null || true

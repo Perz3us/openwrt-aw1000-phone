@@ -57,6 +57,7 @@ status() {
 	json_add_boolean guard "$([ -f "$GUARD" ] && echo 1 || echo 0)"
 	json_add_boolean patch "$([ -s "${patch:-/etc/fxs/si3226x_patch.bin}" ] && echo 1 || echo 0)"
 	json_add_boolean enabled "$(uci -q get fxs.main.enabled || echo 1)"
+	json_add_boolean sipon "$(uci -q get fxs.main.sip || echo 0)"
 	json_dump
 }
 
@@ -88,12 +89,8 @@ set_enabled() {
 	esac
 	uci set fxs.main.enabled="$enabled"
 	uci commit fxs
-	if [ "$enabled" = 1 ]; then
-		/etc/init.d/fxsd enable
-		/etc/init.d/fxsd restart
-	else
-		/etc/init.d/fxsd stop
-	fi
+	[ "$enabled" = 1 ] && /etc/init.d/fxsd enable
+	/etc/init.d/fxsd restart
 	json_init
 	json_add_boolean enabled "$enabled"
 	json_dump

@@ -193,12 +193,15 @@ return view.extend({
 		var off = st.running && (st.offhook || [ 'dialtone', 'digits', 'calling', 'talking', 'busy' ].indexOf(s) >= 0);
 
 		this.phone.className = 'fxs-phone ' + s + (off ? ' offhook' : '') + (st.enabled === false ? ' disabled' : '');
-		this.phoneLabel.textContent = st.enabled === false ? _('Phone port off') : (stateText[s] || s);
+		this.phoneLabel.textContent = st.enabled === false ? (st.running ? _('Phone port off, SIP only') : _('Phone port off')) : (stateText[s] || s);
 		this.phonePeer.textContent = (s === 'ringing' || s === 'calling' || s === 'talking') && st.peer ? st.peer : '';
 		this.phoneTimer.textContent = s === 'talking' && st.duration != null ? fmtDuration(st.duration) : '';
 
-		this.toggle.textContent = st.enabled === false ? _('Phone port: OFF') : _('Phone port: ON');
+		this.toggle.textContent = st.enabled === false ? (st.sipon ? _('Phone port: OFF, SIP only') : _('Phone port: OFF')) : _('Phone port: ON');
 		this.toggle.className = 'btn fxs-switch ' + (st.enabled === false ? 'cbi-button-negative' : 'cbi-button-positive');
+		this.toggleNote.textContent = !st.sipon ? '' : st.enabled === false ?
+			_('The RJ11 phone is off. Calls ring only on SIP phones and apps.') :
+			_('Turn the port off to use only SIP phones and apps. SIP calls keep working.');
 
 		if (this.ringBtn) {
 			this.ringBtn.textContent = st.testring ? _('Stop ringing') : _('Ring the phone');
@@ -275,6 +278,7 @@ return view.extend({
 		this.phone.appendChild(this.phonePeer);
 		this.phone.appendChild(this.phoneTimer);
 		this.toggle = E('button', { 'click': ui.createHandlerFn(this, 'handleToggle') });
+		this.toggleNote = E('div', { 'class': 'cbi-value-description', 'style': 'margin-top: 6px' });
 		this.ringBtn = E('button', { 'click': ui.createHandlerFn(this, 'handleRingTest') });
 		this.updatePhone(st);
 
@@ -298,7 +302,7 @@ return view.extend({
 				E('div', { 'class': 'fxs-top' }, [
 					this.phone,
 					E('div', { 'style': 'flex: 1; min-width: 280px' }, [
-						E('div', { 'style': 'margin-bottom: 12px' }, this.toggle),
+						E('div', { 'style': 'margin-bottom: 12px' }, [ this.toggle, this.toggleNote ]),
 						statusTable
 					])
 				])
