@@ -45,7 +45,7 @@ return view.extend({
 		o.rmempty = false;
 
 		o = s.taboption('general', form.Flag, 'sip', _('SIP calling (experimental)'),
-			_('Lets SIP phones and apps make and answer calls through the SIM, next to the RJ11 phone. It needs QModem voice (qmodem-voip and qmodem-sipd, with at-daemon 3.4.0 or newer) set up and turned on in QModem. Until QModem voice is running, the RJ11 phone keeps working as before. To use only SIP phones, turn the phone port off on the Status page.') + '<br /><strong>' +
+			_('Lets SIP phones and apps make and answer calls through the SIM, next to the RJ11 phone. It needs QModem voice (qmodem-voip and qmodem-sipd, with at-daemon 3.4.0 or newer) set up in QModem. This switch turns QModem voice and its SIP service on and off. Until QModem voice is running, the RJ11 phone keeps working as before. To use only SIP phones, turn the phone port off on the Status page.') + '<br /><strong>' +
 			_('Warning: this is still being tested. Calls may drop or have no sound, and call waiting (flash) on the RJ11 phone does not work while it is on. If something goes wrong, turn it off and report it on') +
 			' <a href="https://github.com/Perz3us/openwrt-aw1000-phone/issues" target="_blank" rel="noreferrer">GitHub</a>.</strong>');
 		o.default = '0';

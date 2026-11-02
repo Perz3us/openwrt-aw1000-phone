@@ -205,6 +205,9 @@ Then in LuCI:
 2. Services > Phone (RJ11) > Settings: tick SIP calling and save. fxsd turns on QModem voice
    and the SIP service by itself.
 
+SIP calling on the Settings page is the on/off switch for SIP. Turning it off also stops
+QModem's SIP service, so SIP phones can't connect to a call that has no sound.
+
 The Status page shows whether fxsd is connected to QModem voice. If QModem voice is not
 running, the RJ11 phone works on its own as before.
 

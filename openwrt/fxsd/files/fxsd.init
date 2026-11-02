@@ -46,8 +46,23 @@ sip_services() {
 		/etc/init.d/qmodem_voip start
 	fi
 	[ -x /etc/init.d/qmodem_voip_sipd ] || return 0
+	if [ "$(uci -q get qmodem_sip.inbound.enabled)" != 1 ] &&
+	   [ "$(uci -q get qmodem_sip.outbound.enabled)" != 1 ]; then
+		uci -q set qmodem_sip.inbound.enabled=1
+		uci -q commit qmodem_sip
+		/etc/init.d/qmodem_voip_sipd enable
+		/etc/init.d/qmodem_voip_sipd restart
+		return 0
+	fi
 	/etc/init.d/qmodem_voip_sipd enabled || /etc/init.d/qmodem_voip_sipd enable
 	/etc/init.d/qmodem_voip_sipd running || /etc/init.d/qmodem_voip_sipd start
+}
+
+sip_stop() {
+	[ -x /etc/init.d/qmodem_voip_sipd ] || return 0
+	/etc/init.d/qmodem_voip_sipd enabled && /etc/init.d/qmodem_voip_sipd disable
+	/etc/init.d/qmodem_voip_sipd running && /etc/init.d/qmodem_voip_sipd stop
+	return 0
 }
 
 start_service() {
@@ -58,6 +73,7 @@ start_service() {
 	config_load fxs
 	config_get_bool enabled main enabled 1
 	config_get_bool sip main sip 0
+	[ "$sip" = 1 ] || sip_stop
 	off=
 	if [ "$enabled" != 1 ]; then
 		[ "$sip" = 1 ] || return 0
