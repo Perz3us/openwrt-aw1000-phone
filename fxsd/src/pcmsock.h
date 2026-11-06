@@ -5,7 +5,7 @@
 
 #include <stdint.h>
 
-#define PCMSOCK_FRAME 160
+#define PCMSOCK_FRAME_MAX 320
 
 struct pcm_down {
 	int16_t held;
@@ -20,7 +20,11 @@ struct pcm_up {
 int pcm_downsample(struct pcm_down *d, const int16_t *in, int n, int16_t *out);
 int pcm_upsample(struct pcm_up *u, const int16_t *in, int n, int16_t *out);
 
-int pcmsock_start(const char *path, const char *dev, int wideband);
+int pcm_frame_samples(int is_wb, int is_native);
+int pcm_from_modem(struct pcm_down *d, int is_wb, int is_native, const int16_t *in, int n, int16_t *out);
+int pcm_to_modem(struct pcm_up *u, int is_wb, int is_native, const int16_t *in, int n, int16_t *out);
+
+int pcmsock_start(const char *path, const char *dev, int wideband, int takes_16k);
 void pcmsock_live(int on);
 void pcmsock_stop(void);
 void pcmsock_stats(uint32_t st[4]);

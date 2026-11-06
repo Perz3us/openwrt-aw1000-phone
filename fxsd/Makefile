@@ -23,6 +23,8 @@ test: tests/test_line.c src/line.c src/clcc.c $(wildcard src/*.h)
 	./build/test_sipmap
 	$(CC) $(CFLAGS) -o build/test_voip_map tests/test_voip_map.c src/voip_map.c
 	./build/test_voip_map
+	$(CC) $(CFLAGS) -o build/test_pcmsock tests/test_pcmsock.c src/pcmsock.c -lpthread
+	./build/test_pcmsock
 
 clean:
 	rm -rf build

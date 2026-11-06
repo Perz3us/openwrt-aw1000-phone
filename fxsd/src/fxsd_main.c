@@ -81,7 +81,7 @@ static struct { char code[4]; char num[CLCC_NUM_MAX]; } speed[LIST_MAX];
 static char block[LIST_MAX][CLCC_NUM_MAX], allow[LIST_MAX][CLCC_NUM_MAX];
 static int nspeed, nblock, nallow;
 static int voice_off;
-static int sip_on, client, phone_off;
+static int sip_on, sip_16k, client, phone_off;
 static const char *sip_name = "";
 
 static void on_sig(int sig)
@@ -1077,6 +1077,7 @@ static void sip_load(const char *dir)
 		return;
 	}
 	voip_service(&m);
+	sip_16k = m.audio == 16000;
 	sip_on = 1;
 }
 
@@ -1265,11 +1266,13 @@ int main(int argc, char **argv)
 		snprintf(d.line.hotline, sizeof(d.line.hotline), "%s", hotline);
 		d.line.hotline_ms = hot_s * 1000;
 	}
-	if (sip_on && (e = pcmsock_start(PCM_SOCK, "/dev/fxs0audio", d.wb))) {
+	if (sip_on && (e = pcmsock_start(PCM_SOCK, "/dev/fxs0audio", d.wb, sip_16k))) {
 		msg(LOG_ERR, "SIP calling needs the newer kernel module (%s), turning it off", strerror(-e));
 		sip_on = 0;
 		e = 0;
 	}
+	if (sip_on)
+		msg(LOG_INFO, "SIP audio %d kHz", pcm_frame_samples(d.wb, sip_16k) == 320 ? 16 : 8);
 	msg(LOG_INFO, "ready on channel %u, modem AT port %s%s%s", d.ch, modem_port(),
 	    sip_on ? ", SIP calling on (experimental)" : "", phone_off ? ", phone port off" : "");
 	trim_log();

@@ -13,7 +13,7 @@
 #include <unistd.h>
 #include "pcmsock.h"
 
-static int afd = -1, lfd = -1, cfd = -1, wb, quit, live, running;
+static int afd = -1, lfd = -1, cfd = -1, wb, native, frame_n, quit, live, running;
 static uint32_t stats[4];
 static pthread_t thread;
 static char sock_path[108];
@@ -47,6 +47,27 @@ int pcm_upsample(struct pcm_up *u, const int16_t *in, int n, int16_t *out)
 	return 2 * n;
 }
 
+int pcm_frame_samples(int is_wb, int is_native)
+{
+	return is_wb && is_native ? 320 : 160;
+}
+
+int pcm_from_modem(struct pcm_down *d, int is_wb, int is_native, const int16_t *in, int n, int16_t *out)
+{
+	if (is_wb && !is_native)
+		return pcm_downsample(d, in, n, out);
+	memcpy(out, in, n * sizeof(*in));
+	return n;
+}
+
+int pcm_to_modem(struct pcm_up *u, int is_wb, int is_native, const int16_t *in, int n, int16_t *out)
+{
+	if (is_wb && !is_native)
+		return pcm_upsample(u, in, n, out);
+	memcpy(out, in, n * sizeof(*in));
+	return n;
+}
+
 static void drop_client(void)
 {
 	if (cfd >= 0)
@@ -66,13 +87,13 @@ static void from_modem(int16_t *frame, int *nf, struct pcm_down *down)
 	n = r / 4;
 	for (i = 0; i < n; i++)
 		s[i] = (int16_t)(pairs[i] & 0xffff);
-	k = wb ? pcm_downsample(down, s, n, d) : n;
+	k = pcm_from_modem(down, wb, native, s, n, d);
 	for (i = 0; i < k; i++) {
-		frame[(*nf)++] = wb ? d[i] : s[i];
-		if (*nf < PCMSOCK_FRAME)
+		frame[(*nf)++] = d[i];
+		if (*nf < frame_n)
 			continue;
 		*nf = 0;
-		if (cfd >= 0 && send(cfd, frame, PCMSOCK_FRAME * 2, MSG_DONTWAIT | MSG_NOSIGNAL) == PCMSOCK_FRAME * 2)
+		if (cfd >= 0 && send(cfd, frame, frame_n * 2, MSG_DONTWAIT | MSG_NOSIGNAL) == frame_n * 2)
 			stats[0]++;
 		else
 			stats[3]++;
@@ -81,8 +102,8 @@ static void from_modem(int16_t *frame, int *nf, struct pcm_down *down)
 
 static void to_modem(int on, struct pcm_up *up)
 {
-	int16_t in[PCMSOCK_FRAME * 2], s[PCMSOCK_FRAME * 4];
-	uint32_t pairs[PCMSOCK_FRAME * 4];
+	int16_t in[PCMSOCK_FRAME_MAX + 1], s[PCMSOCK_FRAME_MAX * 2];
+	uint32_t pairs[PCMSOCK_FRAME_MAX * 2];
 	ssize_t r = recv(cfd, in, sizeof(in), MSG_DONTWAIT);
 	int i, n;
 
@@ -92,12 +113,13 @@ static void to_modem(int on, struct pcm_up *up)
 	}
 	if (r <= 0 || !on)
 		return;
-	stats[1]++;
 	n = r / 2;
-	if (wb)
-		n = pcm_upsample(up, in, n, s);
-	else
-		memcpy(s, in, n * 2);
+	if (n > frame_n) {
+		stats[3]++;
+		return;
+	}
+	stats[1]++;
+	n = pcm_to_modem(up, wb, native, in, n, s);
 	for (i = 0; i < n; i++)
 		pairs[i] = (uint16_t)s[i];
 	if (write(afd, pairs, n * 4) < 0)
@@ -108,7 +130,7 @@ static void *run(void *arg)
 {
 	struct pcm_down down = { 0 };
 	struct pcm_up up = { 0 };
-	int16_t frame[PCMSOCK_FRAME];
+	int16_t frame[PCMSOCK_FRAME_MAX];
 	int nf = 0, was = 0;
 
 	(void)arg;
@@ -143,7 +165,7 @@ static void *run(void *arg)
 	return NULL;
 }
 
-int pcmsock_start(const char *path, const char *dev, int wideband)
+int pcmsock_start(const char *path, const char *dev, int wideband, int takes_16k)
 {
 	struct sockaddr_un a = { .sun_family = AF_UNIX };
 	char dir[108], *slash;
@@ -167,6 +189,8 @@ int pcmsock_start(const char *path, const char *dev, int wideband)
 	if (bind(lfd, (struct sockaddr *)&a, sizeof(a)) || chmod(path, 0600) || listen(lfd, 1))
 		goto fail;
 	wb = wideband;
+	native = takes_16k;
+	frame_n = pcm_frame_samples(wb, native);
 	quit = 0;
 	if (pthread_create(&thread, NULL, run, NULL))
 		goto fail;
