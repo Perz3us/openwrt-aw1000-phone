@@ -154,6 +154,16 @@ int voip_request(const char *method, const char *number)
 	return invoke(method);
 }
 
+int voip_dtmf(char digit)
+{
+	char s[2] = { digit, 0 };
+
+	blob_buf_init(&buf, 0);
+	blobmsg_add_string(&buf, "endpoint", "rj11");
+	blobmsg_add_string(&buf, "digit", s);
+	return invoke("send_dtmf");
+}
+
 const struct voip_snap *voip_snap(void)
 {
 	return &snap;

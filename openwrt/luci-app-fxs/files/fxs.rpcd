@@ -7,6 +7,9 @@
 STATE=/var/run/fxsd.state
 CALLS=/etc/fxs/calls.log
 GUARD=/etc/fxs/.starting
+CMD=/var/run/fxsd.cmd
+UPLOAD=/tmp/fxs-restore.json
+RESTORE_DIR=/tmp/fxs-restore
 
 status() {
 	local state=stopped peer= offhook=0 vbat= vline= iloop= own= testring=0 voiceoff=0 since=0 hd=0 sip=0 sipcall=0 dnd=0 silent=0 phone=-1 k v patch
@@ -145,9 +148,89 @@ delete_calls() {
 	json_dump
 }
 
+result() {
+	json_init
+	json_add_boolean result "$1"
+	[ -n "$2" ] && json_add_string error "$2"
+	json_dump
+}
+
+send_cmd() {
+	printf '%s\n' "$1" > "$CMD.tmp" && mv "$CMD.tmp" "$CMD" && kill -USR2 $(pidof fxsd) 2>/dev/null
+}
+
+click_call() {
+	local input number
+
+	read -r input
+	json_load "$input"
+	json_get_var number number
+	case "$number" in
+	''|*[!0-9+*#]*) result 0 number; return ;;
+	esac
+	[ "${#number}" -le 23 ] || { result 0 number; return; }
+	grep -qE '^state=(idle|dialtone)$' "$STATE" 2>/dev/null || { result 0 busy; return; }
+	send_cmd "call $number" && result 1 || result 0 stopped
+}
+
+ring() {
+	local input seconds
+
+	read -r input
+	json_load "$input"
+	json_get_var seconds seconds
+	case "$seconds" in
+	''|*[!0-9]*) seconds=10 ;;
+	esac
+	[ "$seconds" -ge 1 ] && [ "$seconds" -le 60 ] || { result 0 seconds; return; }
+	grep -qx 'state=idle' "$STATE" 2>/dev/null || { result 0 busy; return; }
+	send_cmd "ring $seconds" && result 1 || result 0 stopped
+}
+
+backup() {
+	json_init
+	json_add_string format fxs-backup
+	json_add_string version "$(pkg_version fxsd)"
+	json_add_string config "$(cat /etc/config/fxs 2>/dev/null)"
+	json_add_string calls "$(cat "$CALLS" 2>/dev/null)"
+	json_dump
+}
+
+restore() {
+	local format config calls
+
+	if [ -f "$STATE" ] && ! grep -qx 'state=idle' "$STATE"; then
+		rm -f "$UPLOAD"
+		result 0 busy
+		return
+	fi
+	[ -s "$UPLOAD" ] && json_load_file "$UPLOAD" 2>/dev/null
+	json_get_var format format
+	json_get_var config config
+	json_get_var calls calls
+	rm -f "$UPLOAD"
+	[ "$format" = fxs-backup ] && [ -n "$config" ] || { result 0 format; return; }
+	rm -rf "$RESTORE_DIR"
+	mkdir -p "$RESTORE_DIR"
+	printf '%s\n' "$config" > "$RESTORE_DIR/fxs"
+	if [ "$(uci -q -c "$RESTORE_DIR" get fxs.main)" != fxs ]; then
+		rm -rf "$RESTORE_DIR"
+		result 0 format
+		return
+	fi
+	mv "$RESTORE_DIR/fxs" /etc/config/fxs
+	rm -rf "$RESTORE_DIR"
+	uci -q revert fxs
+	if [ -n "$calls" ]; then
+		printf '%s\n' "$calls" > "$CALLS.new" && mv "$CALLS.new" "$CALLS"
+	fi
+	/etc/init.d/fxsd restart
+	result 1
+}
+
 case "$1" in
 list)
-	echo '{ "status": {}, "version": {}, "calls": {}, "history": {}, "delete_calls": { "lines": [] }, "clear_history": {},"clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {} }'
+	echo '{ "status": {}, "version": {}, "calls": {}, "history": {}, "delete_calls": { "lines": [] }, "clear_history": {},"clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {}, "ring": { "seconds": 10 }, "click_call": { "number": "" }, "backup": {}, "restore": {} }'
 	;;
 call)
 	case "$2" in
@@ -168,6 +251,10 @@ call)
 			echo '{ "result": false }'
 		fi
 		;;
+	ring) ring ;;
+	click_call) click_call ;;
+	backup) backup ;;
+	restore) restore ;;
 	clear_guard)
 		/etc/init.d/fxsd clear_guard
 		/etc/init.d/fxsd restart

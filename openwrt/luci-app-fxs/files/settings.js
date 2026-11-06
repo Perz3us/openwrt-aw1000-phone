@@ -10,6 +10,7 @@ return view.extend({
 
 		s = m.section(form.NamedSection, 'main', 'fxs');
 		s.tab('general', _('General'));
+		s.tab('calling', _('Calling'));
 		s.tab('dnd', _('Do not disturb'));
 		s.tab('history', _('Call history'));
 		s.tab('led', _('LED'));
@@ -113,6 +114,61 @@ return view.extend({
 		o.datatype = 'range(200,8000)';
 		o.placeholder = '4000';
 		o.depends('ring_pattern', 'custom');
+
+		var isNumber = function(section_id, value) {
+			return !value || /^\+?[0-9]{3,20}$/.test(value) ? true : _('Enter a phone number');
+		};
+
+		o = s.taboption('calling', form.Flag, 'call_waiting', _('Call waiting'),
+			_('You hear a tone when a second call comes in during a call. Press FLASH to switch between the calls. The setting is sent to the network, and some networks do not offer it. While SIP calling is on, call waiting is turned off and a second caller hears busy.'));
+		o.default = '1';
+		o.rmempty = false;
+
+		o = s.taboption('calling', form.Flag, 'hide_number', _('Hide my number'),
+			_('Call without showing your number. To change it for one call, dial *67 (hide) or *82 (show) before the number. Emergency numbers are never hidden.'));
+		o.default = '0';
+		o.rmempty = false;
+
+		o = s.taboption('calling', form.Value, 'dial_wait', _('Dial wait (seconds)'),
+			_('The call starts this long after the last digit. Pressing # starts it right away.'));
+		o.datatype = 'range(2,15)';
+		o.placeholder = '4';
+
+		o = s.taboption('calling', form.Flag, 'hotline_enabled', _('Call when handset is lifted'),
+			_('Lifting the handset calls one number by itself. Pressing any key before that gives a normal call. Useful for an older person, a gate or a shop counter.'));
+		o.default = '0';
+		o.rmempty = false;
+
+		o = s.taboption('calling', form.Value, 'hotline', _('Number to call'));
+		o.placeholder = '0771234567';
+		o.depends('hotline_enabled', '1');
+		o.validate = function(section_id, value) {
+			if (!value)
+				return _('Enter the number to call');
+			return isNumber(section_id, value);
+		};
+
+		o = s.taboption('calling', form.Value, 'hotline_delay', _('Wait before calling (seconds)'),
+			_('With 0 no other number can be dialed, not even an emergency number.'));
+		o.datatype = 'range(0,10)';
+		o.placeholder = '5';
+		o.default = '5';
+		o.depends('hotline_enabled', '1');
+
+		o = s.taboption('advanced', form.Value, 'flash_min', _('Shortest flash (ms)'),
+			_('A hook break shorter than this is ignored. Most phones do not need this changed.'));
+		o.datatype = 'range(20,500)';
+		o.placeholder = '80';
+
+		o = s.taboption('advanced', form.Value, 'flash_max', _('Longest flash (ms)'),
+			_('A longer hook break hangs up. Raise it if your FLASH key ends the call, lower it if a quick hang up acts like FLASH. It has to be at least 100 ms above the shortest flash.'));
+		o.datatype = 'range(300,3000)';
+		o.placeholder = '700';
+		o.validate = function(section_id, value) {
+			var min = +this.section.formvalue(section_id, 'flash_min') || 80;
+
+			return !value || +value >= min + 100 ? true : _('Must be at least 100 ms above the shortest flash');
+		};
 
 		o = s.taboption('dnd', form.Flag, 'dnd', _('Do not disturb'),
 			_('The RJ11 phone does not ring during these hours. Calls still show in the call history as missed, and SIP phones still ring. Numbers in the allowed list always ring.'));

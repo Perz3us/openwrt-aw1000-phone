@@ -43,20 +43,80 @@ static void go_busy(struct line *l, unsigned long now)
 	enter(l, LS_BUSY, now);
 }
 
+int line_emergency(const char *number)
+{
+	static const char *const list[] = {
+		"000", "08", "100", "101", "102", "108", "110", "112", "118", "119", "911", "999", "1990",
+	};
+	size_t i;
+
+	if (*number == '+')
+		number++;
+	for (i = 0; i < sizeof(list) / sizeof(list[0]); i++)
+		if (!strcmp(number, list[i]))
+			return 1;
+	return 0;
+}
+
+static void strip_code(char *d)
+{
+	memmove(d, d + 3, strlen(d + 3) + 1);
+}
+
+static int is_digit(char c)
+{
+	return c >= '0' && c <= '9';
+}
+
 static void place_call(struct line *l, unsigned long now)
 {
-	const char *num = l->digits;
+	const char *num;
+	char *d = l->digits;
 
-	l->digits[l->n] = 0;
-	if (l->digits[0] == '*' && l->ops->speed && (num = l->ops->speed(l->ops->ctx, l->digits + 1)))
-		snprintf(l->digits, sizeof(l->digits), "%s", num);
-	strcpy(l->peer, l->digits);
+	d[l->n] = 0;
+	l->clir = l->hide;
+	if (d[0] == '*' && l->ops->speed && (num = l->ops->speed(l->ops->ctx, d + 1))) {
+		snprintf(d, sizeof(l->digits), "%s", num);
+	} else if (!strcmp(d, "*66") || !strcmp(d, "*69") || !strcmp(d, "*86")) {
+		num = !strcmp(d, "*66") ? l->last_out : !strcmp(d, "*69") ? l->last_in : "";
+		if (!*num || strlen(num) >= sizeof(l->digits)) {
+			go_busy(l, now);
+			return;
+		}
+		memcpy(d, num, strlen(num) + 1);
+	} else if (!strncmp(d, "*67", 3) && is_digit(d[3])) {
+		strip_code(d);
+		l->clir = 1;
+	} else if (!strncmp(d, "*82", 3) && is_digit(d[3])) {
+		strip_code(d);
+		l->clir = 2;
+	}
+	if (line_emergency(d))
+		l->clir = 0;
+	strcpy(l->peer, d);
+	strcpy(l->last_out, d);
 	l->seen_call = 0;
 	l->ringback_on = 0;
 	l->ops->dial(l->ops->ctx, l->digits);
 	l->ops->audio(l->ops->ctx, 1);
 	note(l, "dial", l->peer);
 	enter(l, LS_CALLING, now);
+}
+
+static void dial_now(struct line *l, const char *number, unsigned long now)
+{
+	snprintf(l->digits, sizeof(l->digits), "%s", number);
+	l->n = strlen(l->digits);
+	l->autodial[0] = 0;
+	l->ops->tone(l->ops->ctx, TONE_OFF);
+	place_call(l, now);
+}
+
+void line_autodial(struct line *l, const char *number, unsigned long now)
+{
+	snprintf(l->autodial, sizeof(l->autodial), "%s", number ? number : "");
+	if (*l->autodial && l->state == LS_DIALTONE)
+		dial_now(l, l->autodial, now);
 }
 
 void line_init(struct line *l, const struct line_ops *ops)
@@ -139,7 +199,10 @@ void line_hook(struct line *l, int offhook, unsigned long now)
 	if (l->offhook)
 		return;
 	l->offhook = 1;
-	if (l->state == LS_IDLE) {
+	if (l->state == LS_IDLE && *l->autodial) {
+		l->ops->ring(l->ops->ctx, 0);
+		dial_now(l, l->autodial, now);
+	} else if (l->state == LS_IDLE) {
 		l->n = 0;
 		l->ops->tone(l->ops->ctx, TONE_DIAL);
 		enter(l, LS_DIALTONE, now);
@@ -159,6 +222,11 @@ void line_hook(struct line *l, int offhook, unsigned long now)
 
 void line_digit(struct line *l, char d, unsigned long now)
 {
+	if (l->state == LS_TALKING) {
+		if (l->ops->dtmf)
+			l->ops->dtmf(l->ops->ctx, d);
+		return;
+	}
 	if (l->state == LS_DIALTONE) {
 		if (d == '#')
 			return;
@@ -219,9 +287,23 @@ static void talking(struct line *l, const struct clcc_call *calls, int n, unsign
 		strcpy(l->peer, active->number);
 		note(l, "switched", l->peer);
 	}
+	if (waiting && l->ops->blocked && l->ops->blocked(l->ops->ctx, waiting->number)) {
+		if (waiting->id != l->blocked_id) {
+			l->blocked_id = waiting->id;
+			note(l, "blocked", waiting->number);
+		} else if (now - l->t_block < HANGUP_RETRY_MS) {
+			return;
+		}
+		l->t_block = now;
+		waiting_off(l);
+		if (l->ops->chld)
+			l->ops->chld(l->ops->ctx, "0");
+		return;
+	}
 	if (waiting && !l->waiting_on) {
 		l->ops->tone(l->ops->ctx, TONE_WAITING);
 		l->waiting_on = 1;
+		strcpy(l->last_in, waiting->number);
 		note(l, "waiting", waiting->number);
 	} else if (!waiting) {
 		waiting_off(l);
@@ -258,6 +340,7 @@ void line_modem(struct line *l, const struct clcc_call *calls, int n, unsigned l
 		} else if (in) {
 			l->blocked_id = 0;
 			strcpy(l->peer, in->number);
+			strcpy(l->last_in, in->number);
 			l->recall = 0;
 			l->ops->ring(l->ops->ctx, 1);
 			note(l, "incoming", l->peer);
@@ -308,7 +391,9 @@ void line_tick(struct line *l, unsigned long now)
 		went_onhook(l, now);
 		return;
 	}
-	if (l->state == LS_DIALTONE && now - l->t_state >= l->dialtone_ms)
+	if (l->state == LS_DIALTONE && *l->hotline && now - l->t_state >= l->hotline_ms)
+		dial_now(l, l->hotline, now);
+	else if (l->state == LS_DIALTONE && now - l->t_state >= l->dialtone_ms)
 		go_busy(l, now);
 	else if (l->state == LS_DIGITS && now - l->t_digit >= l->digit_ms)
 		place_call(l, now);

@@ -25,6 +25,7 @@ struct line_ops {
 	void (*answer)(void *ctx);
 	void (*hangup)(void *ctx);
 	void (*chld)(void *ctx, const char *arg);
+	void (*dtmf)(void *ctx, char digit);
 	void (*log)(void *ctx, const char *what, const char *number);
 	const char *(*speed)(void *ctx, const char *code);
 	int (*blocked)(void *ctx, const char *number);
@@ -46,10 +47,17 @@ struct line {
 	int seen_call;
 	int ringback, ringback_on;
 	int recall, waiting_on, ncalls, active_id, held, blocked_id, released;
-	unsigned long t_state, t_digit, t_onhook, t_hangup, t_gone;
-	unsigned dialtone_ms, digit_ms, flash_min_ms, flash_ms, busy_ms, setup_ms, gone_ms;
+	int hide, clir;
+	char last_out[CLCC_NUM_MAX];
+	char last_in[CLCC_NUM_MAX];
+	char hotline[LINE_DIGITS_MAX];
+	char autodial[LINE_DIGITS_MAX];
+	unsigned long t_state, t_digit, t_onhook, t_hangup, t_gone, t_block;
+	unsigned dialtone_ms, digit_ms, flash_min_ms, flash_ms, busy_ms, setup_ms, gone_ms, hotline_ms;
 };
 
+int line_emergency(const char *number);
+void line_autodial(struct line *l, const char *number, unsigned long now);
 void line_init(struct line *l, const struct line_ops *ops);
 void line_hook(struct line *l, int offhook, unsigned long now);
 void line_digit(struct line *l, char d, unsigned long now);

@@ -26,6 +26,7 @@ int voip_connected(void);
 void voip_events(void);
 int voip_refresh(void);
 int voip_request(const char *method, const char *number);
+int voip_dtmf(char digit);
 const struct voip_snap *voip_snap(void);
 int voip_changed(void);
 

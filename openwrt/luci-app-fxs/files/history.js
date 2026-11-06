@@ -9,6 +9,7 @@ var callStatus = rpc.declare({ object: 'fxs', method: 'status' });
 var callHistory = rpc.declare({ object: 'fxs', method: 'history', expect: { log: '' } });
 var callClear = rpc.declare({ object: 'fxs', method: 'clear_history' });
 var callDelete = rpc.declare({ object: 'fxs', method: 'delete_calls', params: [ 'lines' ] });
+var callClick = rpc.declare({ object: 'fxs', method: 'click_call', params: [ 'number' ] });
 
 var PAGE = 50;
 
@@ -245,11 +246,19 @@ return view.extend({
 					c.dir == 'in' ? '↙ ' + _('Incoming') : '↗ ' + _('Outgoing'))),
 				E('td', { 'class': 'td' }, duration(c)),
 				E('td', { 'class': 'td' }, E('span', { 'class': bad ? 'fxs-bad' : '' }, statusText[c.status] || c.status)),
-				E('td', { 'class': 'td right' }, c.status == 'active' ? '' : E('button', {
-					'class': 'btn cbi-button-remove',
-					'title': _('Delete this call'),
-					'click': L.bind(this.deleteCall, this, c)
-				}, _('Delete')))
+				E('td', { 'class': 'td right' }, c.status == 'active' ? '' : [
+					/^\+?[0-9*#]{1,23}$/.test(c.number) ? E('button', {
+						'class': 'btn cbi-button-action',
+						'title': _('Ring the phone and call this number when you lift the handset'),
+						'click': L.bind(this.clickCall, this, c)
+					}, _('Call')) : '',
+					' ',
+					E('button', {
+						'class': 'btn cbi-button-remove',
+						'title': _('Delete this call'),
+						'click': L.bind(this.deleteCall, this, c)
+					}, _('Delete'))
+				])
 			]);
 		}, this);
 
@@ -292,6 +301,15 @@ return view.extend({
 		document.body.appendChild(a);
 		a.click();
 		document.body.removeChild(a);
+	},
+
+	clickCall: function(c) {
+		return callClick(c.number).then(function(r) {
+			if (r && r.result)
+				ui.addNotification(null, E('p', _('The phone is ringing. Lift the handset within 30 seconds to call %s.').format(c.number)), 'info');
+			else
+				ui.addNotification(null, E('p', r && r.error == 'busy' ? _('The phone is in use.') : _('The phone service is not running.')));
+		});
 	},
 
 	deleteCall: function(c) {

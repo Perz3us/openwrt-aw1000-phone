@@ -28,7 +28,15 @@ Other things that work:
   Numbers can be shown the way you dial them, like 0771234567 instead of 94771234567
 - Ringing tone in the handset while the other side rings
 - Hold: press FLASH during a call, press it again to come back
+- Keypad digits during a call, for phone menus and voicemail
 - Speed dial: save a number under a code and dial `*1`, `*2` and so on
+- Phone codes: `*66` redial, `*69` call back the last caller, and `*67` or `*82` before a number
+  to hide or show your number for that call
+- Lifting the handset can call one set number by itself
+- A Call button in the call history: the phone rings, you lift the handset and it dials
+- Ring the phone from a script, for a doorbell or an alarm
+- A script of your own that runs on call events, for example a message on a missed call
+- Backup and restore of the settings and call history on the Status page
 - Blocked numbers, including hidden numbers if you want
 - The phone LED shows the line state: solid when ready, fast blink when a call comes in, slow
   blink while the handset is off hook (each can be changed). During NoobWRT's LED night mode
@@ -39,9 +47,9 @@ Other things that work:
   warns when no phone seems to be plugged in (checked each time the phone rings)
 - Call history with search, filters, CSV export and optional auto delete
 
-Call waiting is in the code but did not work on my SIM, the network answers busy for the
-second call. Pulse dialing and tones for other countries are not done yet (dial and busy
-tone are 425 Hz).
+Call waiting: fxsd asks the network to turn it on when it starts. You hear a tone when a second
+call comes in and FLASH switches between the calls. Some networks do not offer it, the log says
+so. Pulse dialing and tones for other countries are not done yet (dial and busy tone are 425 Hz).
 
 ## What you need
 
@@ -120,6 +128,8 @@ python3 tools/mkpatch.py si3226x_patch_C_FB_2017MAY26.c si3226x_patch.bin
 
 Everything can be set in LuCI under Services > Phone (RJ11). It has five tabs: Status,
 Call history, Settings, Speed dial and Blocked numbers. The same settings are in `/etc/config/fxs`.
+Save backup and Restore backup are on the Status page. A restore replaces the settings and the
+call history, and restarts the phone service.
 
 | Option | Default | |
 |---|---|---|
@@ -156,10 +166,53 @@ Call history, Settings, Speed dial and Blocked numbers. The same settings are in
 | `dnd_allow` | | list of numbers that always ring during do not disturb |
 | `history_autodelete` | `0` | delete old calls from the call history |
 | `history_days` | `30` | how many days of calls to keep when that is on |
+| `call_waiting` | `1` | ask the network for call waiting. While `sip` is on it is turned off and a second caller hears busy |
+| `hide_number` | `0` | call from the RJ11 phone without showing your number |
+| `hotline_enabled` | `0` | lifting the handset calls `hotline` by itself |
+| `hotline` | | the number to call when the handset is lifted |
+| `hotline_delay` | `5` | seconds to wait before that call (0 to 10). Pressing a key first gives a normal call. With 0 no other number can be dialed, not even an emergency number |
+| `dial_wait` | `4` | seconds after the last digit before the call starts (2 to 15) |
+| `flash_min` | `80` | a hook break shorter than this (ms) is ignored (20 to 500) |
+| `flash_max` | `700` | a hook break longer than this (ms) hangs up (300 to 3000), at least 100 above `flash_min` |
 
 Speed dial entries are `config speed` sections with `code` and `number`, blocked numbers are
 `config block` sections with `number`. Numbers are matched on the last 9 digits, so
-`0771234567` also blocks `+94771234567`.
+`0771234567` also blocks `+94771234567`. A speed dial code wins over a phone code with the same
+digits, so a speed dial saved under `66` replaces redial.
+
+## Ringing the phone from a script
+
+```
+ubus call fxs ring '{"seconds":20}'
+```
+
+This rings the phone for 1 to 60 seconds without caller ID, also during do not disturb. It does
+nothing while the phone is in use. To call a number when the handset is lifted:
+
+```
+ubus call fxs click_call '{"number":"0771234567"}'
+```
+
+## Call events
+
+If `/etc/fxs/hook.sh` exists and can be run, fxsd starts it on every call event with the event and
+the number. The events are `incoming`, `answered`, `missed`, `elsewhere`, `blocked`, `waiting`,
+`dial`, `connected`, `failed`, `hangup` and `ended`. The script should finish quickly and keep the
+number in quotes, it comes from the network. It is not part of the backup. For example, a
+message through ntfy on a missed call:
+
+```
+#!/bin/sh
+[ "$1" = missed ] && wget -q -O /dev/null --post-data "Missed call from ${2:-a hidden number}" https://ntfy.sh/your-topic
+```
+
+Then run `chmod +x /etc/fxs/hook.sh`.
+
+## Emergency calls
+
+Numbers like 112, 911 and 119 are never hidden, and blocked numbers and do not disturb do not
+apply to them. Whether an emergency call goes through depends on the modem and the network, and
+this has not been tested with a real emergency call. Don't rely on this port for them.
 
 Logs: `logread -e fxsd`. Call log: `/etc/fxs/calls.log`. Phone numbers and dialed digits
 only go to the call log, not to the system log.

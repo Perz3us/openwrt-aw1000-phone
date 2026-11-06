@@ -10,6 +10,10 @@ var callClearGuard = rpc.declare({ object: 'fxs', method: 'clear_guard' });
 var callSetEnabled = rpc.declare({ object: 'fxs', method: 'set_enabled', params: [ 'enabled' ] });
 var callRingTest = rpc.declare({ object: 'fxs', method: 'ring_test' });
 var callVersion = rpc.declare({ object: 'fxs', method: 'version' });
+var callBackup = rpc.declare({ object: 'fxs', method: 'backup' });
+var callRestore = rpc.declare({ object: 'fxs', method: 'restore' });
+
+var RESTORE_FILE = '/tmp/fxs-restore.json';
 
 var stateText = {
 	idle: _('Idle (on hook)'),
@@ -244,6 +248,51 @@ return view.extend({
 		}, this));
 	},
 
+	handleBackup: function() {
+		return callBackup().then(function(r) {
+			var a = E('a', {
+				'href': URL.createObjectURL(new Blob([ JSON.stringify(r) ], { type: 'application/json' })),
+				'download': 'phone-backup-' + new Date().toISOString().slice(0, 10) + '.json'
+			});
+
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+		});
+	},
+
+	handleRestore: function(ev) {
+		var label = ev.target.firstChild, text = label.data;
+
+		return ui.uploadFile(RESTORE_FILE, label).then(function() {
+			ui.showModal(_('Restore phone settings'), [
+				E('p', _('This replaces the phone settings, speed dial, blocked numbers and call history with the ones in the file, then restarts the phone service. It cannot be undone.')),
+				E('div', { 'class': 'right' }, [
+					E('button', { 'class': 'btn', 'click': function() {
+						ui.hideModal();
+					} }, _('Cancel')),
+					' ',
+					E('button', { 'class': 'btn cbi-button-negative', 'click': ui.createHandlerFn(this, function() {
+						return callRestore().then(function(r) {
+							ui.hideModal();
+							if (r && r.result)
+								window.location.reload();
+							else
+								ui.addNotification(null, E('p', r && r.error == 'busy' ?
+									_('The phone is in use. Try again when it is idle.') :
+									_('This is not a phone settings backup.')));
+						});
+					}) }, _('Restore'))
+				])
+			]);
+		}).catch(function(e) {
+			if (e.name != 'cancelled' && !/cancel/i.test(e.message || ''))
+				ui.addNotification(null, E('p', _('Upload failed: %s').format(e.message)));
+		}).finally(function() {
+			label.data = text;
+		});
+	},
+
 	handleToggle: function() {
 		var want = !this.enabled;
 
@@ -311,6 +360,14 @@ return view.extend({
 				E('h3', _('Line test')),
 				lineTable,
 				E('div', { 'style': 'margin-top: 10px' }, this.ringBtn)
+			]),
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', _('Backup')),
+				E('div', { 'class': 'cbi-value-description', 'style': 'margin-bottom: 10px' },
+					_('Save or load the phone settings, speed dial, blocked numbers and call history.')),
+				E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, 'handleBackup') }, _('Save backup')),
+				' ',
+				E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, 'handleRestore') }, _('Restore backup'))
 			]),
 			E('div', { 'class': 'fxs-footer' }, [
 				E('div', {}, [
