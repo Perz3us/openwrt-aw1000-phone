@@ -29,6 +29,8 @@ for s in start stop status; do
 	[ -x "$dir/$s" ] || fail "$s is missing or cannot be run"
 done
 
+[ ! -e "$dir/setup" ] || [ -x "$dir/setup" ] || fail "setup cannot be run"
+
 if [ -x "$dir/status" ]; then
 	st=$("$dir/status")
 	case "$st" in

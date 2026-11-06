@@ -1,0 +1,19 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 perz3us
+
+if [ ! -x /etc/init.d/qmodem_voip ]; then
+	echo "Install qmodem-voip from QModem."
+	exit 0
+fi
+[ -x /etc/init.d/qmodem_voip_sipd ] || echo "Install qmodem-sipd from QModem."
+ubus list at-daemon >/dev/null 2>&1 || echo "Install at-daemon 3.4.0 or newer, QModem voice needs it."
+[ -e /dev/fxs0audio ] || echo "Update the kernel module to 0.3.0 or newer."
+for s in $(uci -q show qmodem | sed -n 's/^qmodem\.\([^.=]*\)=modem-device$/\1/p'); do
+	[ "$(uci -q get "qmodem.$s.use_ubus")" = 1 ] ||
+		echo "QModem has to use the at-daemon. On the router run: uci set qmodem.$s.use_ubus=1; uci commit qmodem; reboot"
+done
+if [ -z "$(uci -q get qmodem_sip.inbound.username)" ] || [ -z "$(uci -q get qmodem_sip.inbound.password)" ]; then
+	echo "Add a SIP account in QModem > VoIP: turn on Inbound SIP, type an account name and press Generate for the password."
+fi
+exit 0

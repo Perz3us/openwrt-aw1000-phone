@@ -23,7 +23,7 @@ starts by itself after a reboot.
 Other things that work:
 
 - HD calling (16 kHz wideband audio), off by default, turn it on in Settings
-- SIP calling through QModem voice (experimental, off by default, see below)
+- SIP calling through a SIP service you choose, QModem voice is the first one (experimental, off by default, see below)
 - Caller ID on phones with a display (FSK Bellcore, FSK ETSI or DTMF, before or after the first ring).
   Numbers can be shown the way you dial them, like 0771234567 instead of 94771234567
 - Ringing tone in the handset while the other side rings
@@ -56,7 +56,7 @@ so. Pulse dialing and tones for other countries are not done yet (dial and busy 
 - AW1000 with the Quectel RG500Q-EA modem
 - OpenWrt 25.12. I use [NoobWRT](https://github.com/nooblk-98/noobwrt-arcadyan-aw1k) 25.12.5
 - QModem is optional. With it fxsd sends AT commands through its at-daemon, without it fxsd
-  talks to the modem AT port itself. SIP calling needs QModem voice
+  talks to the modem AT port itself. SIP calling needs a SIP service, like QModem voice
 - A SIM with voice calls (VoLTE)
 - The SLIC DSP patch file, see below
 
@@ -126,14 +126,14 @@ python3 tools/mkpatch.py si3226x_patch_C_FB_2017MAY26.c si3226x_patch.bin
 
 ## Settings
 
-Everything can be set in LuCI under Services > Phone (RJ11). It has five tabs: Status,
-Call history, Settings, Speed dial and Blocked numbers. The same settings are in `/etc/config/fxs`.
+Everything can be set in LuCI under Services > Phone (RJ11). It has six tabs: Status,
+Call history, Settings, SIP, Speed dial and Blocked numbers. The same settings are in `/etc/config/fxs`.
 Save backup and Restore backup are on the Status page. A restore replaces the settings and the
 call history, and restarts the phone service.
 
 | Option | Default | |
 |---|---|---|
-| `enabled` | `1` | turn the port on or off. With `sip` on, turning it off keeps SIP calling working without the RJ11 phone |
+| `enabled` | `1` | turn the port on or off. With `sip_enabled` on, turning it off keeps SIP calling working without the RJ11 phone |
 | `own_number` | | your number, shown on the Status page |
 | `tx_gain` | `-6` | your voice level to the other side (dB) |
 | `rx_gain` | `0` | the other side's level to your phone (dB) |
@@ -144,7 +144,8 @@ call history, and restarts the phone service.
 | `patch` | `/etc/fxs/si3226x_patch.bin` | patch file |
 | `ringback` | `1` | ringing tone while the other side rings |
 | `hd` | `0` | HD calling (16 kHz). Changing it restarts the modem, mobile data drops for about 30 seconds |
-| `sip` | `0` | SIP calling through QModem voice (experimental) |
+| `sip_enabled` | `0` | SIP calling (experimental) |
+| `sip_service` | `qmodem` | the SIP service to use, a folder in `/usr/share/fxs/sip` |
 | `callerid` | `bellcore` | caller ID format: bellcore, etsi, dtmf or off |
 | `callerid_format` | `received` | `local` shows numbers from your own country the way you dial them and puts the international prefix (like 00) in front of other numbers. `received` sends the number without the + |
 | `callerid_country` | `auto` | your country code without the +, `auto` reads it from the SIM |
@@ -166,7 +167,7 @@ call history, and restarts the phone service.
 | `dnd_allow` | | list of numbers that always ring during do not disturb |
 | `history_autodelete` | `0` | delete old calls from the call history |
 | `history_days` | `30` | how many days of calls to keep when that is on |
-| `call_waiting` | `1` | ask the network for call waiting. While `sip` is on it is turned off and a second caller hears busy |
+| `call_waiting` | `1` | ask the network for call waiting. While `sip_enabled` is on it is turned off and a second caller hears busy |
 | `hide_number` | `0` | call from the RJ11 phone without showing your number |
 | `hotline_enabled` | `0` | lifting the handset calls `hotline` by itself |
 | `hotline` | | the number to call when the handset is lifted |
@@ -226,12 +227,13 @@ and fxsd starts again.
 ## SIP calling (experimental)
 
 With this on, SIP phones and apps on your network can make and answer calls through the SIM
-as well as the RJ11 phone. The SIP side is done by QModem voice (qmodem-voip and
-qmodem-sipd). fxsd hands it the modem audio and takes the RJ11 phone's calls through it, so
-both sides know about each other: an incoming call rings the RJ11 phone and the SIP phones,
-and whichever answers first gets the call.
+as well as the RJ11 phone. The SIP side is done by a SIP service you choose on the SIP tab.
+QModem voice (qmodem-voip and qmodem-sipd) comes as the first choice. fxsd hands the service
+the modem audio and takes the RJ11 phone's calls through it, so both sides know about each
+other: an incoming call rings the RJ11 phone and the SIP phones, and whichever answers first
+gets the call.
 
-What you need:
+What you need for QModem voice:
 
 - a QModem build with AW1000 support in QModem voice. It was added in
   [FUjr/QModem#290](https://github.com/FUjr/QModem/pull/290) and is in QModem main, not in a
@@ -255,14 +257,14 @@ Then in LuCI:
 
 1. QModem > VoIP: turn on Inbound SIP, type a SIP account name and press Generate for the
    password. Write it down, it is shown once. Save.
-2. Services > Phone (RJ11) > Settings: tick SIP calling and save. fxsd turns on QModem voice
-   and the SIP service by itself.
+2. Services > Phone (RJ11) > SIP: tick Turn on SIP, choose QModem voice and save. fxsd turns
+   on QModem voice and its SIP service by itself.
 
-SIP calling on the Settings page is the on/off switch for SIP. Turning it off also stops
-QModem's SIP service, so SIP phones can't connect to a call that has no sound.
+The SIP tab is the on/off switch for SIP. Turning it off also stops the service's SIP side,
+so SIP phones can't connect to a call that has no sound. You can't change it during a call.
 
-The Status page shows whether fxsd is connected to QModem voice. If QModem voice is not
-running, the RJ11 phone works on its own as before.
+The SIP tab shows whether fxsd is connected to the service, and lists anything the service
+still needs. If the service is not running, the RJ11 phone works on its own as before.
 
 In the SIP app (Linphone, Zoiper and so on) use the account name and password from step 1,
 domain `192.168.1.1` (your router's LAN address), port 5060, transport UDP. In the app's audio
@@ -270,8 +272,8 @@ codecs turn on PCMA or PCMU, other codecs don't work. The phone has to be on the
 Wi-Fi or LAN. Keep the app running in the background or it can't ring.
 If it was closed, open it while the RJ11 phone is ringing and the call shows up.
 
-FLASH (hold and call waiting) on the RJ11 phone doesn't work while it is on. Calls to and
-from SIP use 8 kHz audio, even with HD calling on. A call answered on a SIP phone shows as
+FLASH (hold and call waiting) on the RJ11 phone doesn't work while it is on. QModem voice
+uses 8 kHz audio, even with HD calling on. A call answered on a SIP phone shows as
 "Answered on SIP" in the call history.
 
 This is new and still being tested. If calls drop, have no sound or the phone stops

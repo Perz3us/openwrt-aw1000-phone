@@ -10,6 +10,19 @@ GUARD=/etc/fxs/.starting
 CMD=/var/run/fxsd.cmd
 UPLOAD=/tmp/fxs-restore.json
 RESTORE_DIR=/tmp/fxs-restore
+SIP_ROOT=/usr/share/fxs/sip
+
+sip_is_on() {
+	uci -q get fxs.main.sip_enabled || uci -q get fxs.main.sip || echo 0
+}
+
+sip_current() {
+	uci -q get fxs.main.sip_service || echo qmodem
+}
+
+sip_title() {
+	[ -f "$SIP_ROOT/$1/info" ] && (. "$SIP_ROOT/$1/info"; echo "$TITLE")
+}
 
 status() {
 	local state=stopped peer= offhook=0 vbat= vline= iloop= own= testring=0 voiceoff=0 since=0 hd=0 sip=0 sipcall=0 dnd=0 silent=0 phone=-1 k v patch
@@ -60,7 +73,8 @@ status() {
 	json_add_boolean guard "$([ -f "$GUARD" ] && echo 1 || echo 0)"
 	json_add_boolean patch "$([ -s "${patch:-/etc/fxs/si3226x_patch.bin}" ] && echo 1 || echo 0)"
 	json_add_boolean enabled "$(uci -q get fxs.main.enabled || echo 1)"
-	json_add_boolean sipon "$(uci -q get fxs.main.sip || echo 0)"
+	json_add_boolean sipon "$(sip_is_on)"
+	json_add_string siptitle "$(sip_title "$(sip_current)")"
 	json_dump
 }
 
@@ -228,9 +242,74 @@ restore() {
 	result 1
 }
 
+sip_services() {
+	local d l TITLE URL connected=0
+
+	[ "$(sed -n 's/^sip=//p' "$STATE" 2>/dev/null)" = 2 ] && connected=1
+	json_init
+	json_add_boolean enabled "$(sip_is_on)"
+	json_add_string current "$(sip_current)"
+	json_add_boolean connected "$connected"
+	json_add_array services
+	for d in "$SIP_ROOT"/*; do
+		[ -f "$d/map" ] || continue
+		TITLE=
+		URL=
+		[ -f "$d/info" ] && . "$d/info"
+		json_add_object
+		json_add_string name "${d##*/}"
+		json_add_string title "$TITLE"
+		json_add_string url "$URL"
+		json_add_string status "$([ -x "$d/status" ] && "$d/status")"
+		json_add_int audio "$(awk '$1 == "audio" { a = $2 } END { print a ? a : 8000 }' "$d/map")"
+		json_add_array setup
+		if [ -x "$d/setup" ]; then
+			"$d/setup" > /tmp/fxs-setup.$$ 2>/dev/null
+			while IFS= read -r l; do
+				[ -n "$l" ] && json_add_string "" "$l"
+			done < /tmp/fxs-setup.$$
+			rm -f /tmp/fxs-setup.$$
+		fi
+		json_close_array
+		json_close_object
+	done
+	json_close_array
+	json_dump
+}
+
+set_sip() {
+	local input enabled name
+
+	read -r input
+	json_load "$input"
+	json_get_var enabled enabled
+	json_get_var name name
+	case "$enabled" in
+	1|true) enabled=1 ;;
+	*) enabled=0 ;;
+	esac
+	if [ -f "$STATE" ] && ! grep -qx 'state=idle' "$STATE"; then
+		result 0 busy
+		return
+	fi
+	case "$name" in
+	''|*[!a-z0-9_-]*) result 0 name; return ;;
+	esac
+	if [ ! -f "$SIP_ROOT/$name/map" ] ||
+	   { [ "$enabled" = 1 ] && [ "$("$SIP_ROOT/$name/status" 2>/dev/null)" = not-installed ]; }; then
+		result 0 not-installed
+		return
+	fi
+	uci set fxs.main.sip_enabled="$enabled"
+	uci set fxs.main.sip_service="$name"
+	uci commit fxs
+	/etc/init.d/fxsd restart
+	result 1
+}
+
 case "$1" in
 list)
-	echo '{ "status": {}, "version": {}, "calls": {}, "history": {}, "delete_calls": { "lines": [] }, "clear_history": {},"clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {}, "ring": { "seconds": 10 }, "click_call": { "number": "" }, "backup": {}, "restore": {} }'
+	echo '{ "sip_services": {}, "set_sip": { "enabled": true, "name": "" }, "status": {}, "version": {}, "calls": {}, "history": {}, "delete_calls": { "lines": [] }, "clear_history": {},"clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {}, "ring": { "seconds": 10 }, "click_call": { "number": "" }, "backup": {}, "restore": {} }'
 	;;
 call)
 	case "$2" in
@@ -255,6 +334,8 @@ call)
 	click_call) click_call ;;
 	backup) backup ;;
 	restore) restore ;;
+	sip_services) sip_services ;;
+	set_sip) set_sip ;;
 	clear_guard)
 		/etc/init.d/fxsd clear_guard
 		/etc/init.d/fxsd restart

@@ -39,6 +39,15 @@
 		}
 	},
 
+	"admin/services/fxs/sip": {
+		"title": "SIP",
+		"order": 25,
+		"action": {
+			"type": "view",
+			"path": "fxs/sip"
+		}
+	},
+
 	"admin/services/fxs/speeddial": {
 		"title": "Speed dial",
 		"order": 30,

@@ -45,13 +45,6 @@ return view.extend({
 		o.default = '0';
 		o.rmempty = false;
 
-		o = s.taboption('general', form.Flag, 'sip', _('SIP calling (experimental)'),
-			_('Lets SIP phones and apps make and answer calls through the SIM, next to the RJ11 phone. It needs QModem voice (qmodem-voip and qmodem-sipd, with at-daemon 3.4.0 or newer) set up in QModem. This switch turns QModem voice and its SIP service on and off. Until QModem voice is running, the RJ11 phone keeps working as before. To use only SIP phones, turn the phone port off on the Status page.') + '<br /><strong>' +
-			_('Warning: this is still being tested. Calls may drop or have no sound, and call waiting (flash) on the RJ11 phone does not work while it is on. If something goes wrong, turn it off and report it on') +
-			' <a href="https://github.com/Perz3us/openwrt-aw1000-phone/issues" target="_blank" rel="noreferrer">GitHub</a>.</strong>');
-		o.default = '0';
-		o.rmempty = false;
-
 		o = s.taboption('general', form.ListValue, 'callerid', _('Caller ID'),
 			_('Sends the caller\'s number to phones with a display. If your phone shows nothing, try another format or timing.'));
 		o.value('bellcore', _('FSK (Bellcore)'));
@@ -120,7 +113,7 @@ return view.extend({
 		};
 
 		o = s.taboption('calling', form.Flag, 'call_waiting', _('Call waiting'),
-			_('You hear a tone when a second call comes in during a call. Press FLASH to switch between the calls. The setting is sent to the network, and some networks do not offer it. While SIP calling is on, call waiting is turned off and a second caller hears busy.'));
+			_('You hear a tone when a second call comes in during a call. Press FLASH to switch between the calls. The setting is sent to the network, and some networks do not offer it. While SIP is on in the SIP tab, call waiting is turned off and a second caller hears busy.'));
 		o.default = '1';
 		o.rmempty = false;
 

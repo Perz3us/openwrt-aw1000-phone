@@ -146,7 +146,7 @@ function statusRows(st) {
 	];
 
 	if (st.running && st.sip)
-		rows.push([ _('SIP calling'), st.sip < 2 ? _('Waiting for QModem voice, the phone uses the modem directly') :
+		rows.push([ _('SIP calling'), st.sip < 2 ? _('Waiting for %s, the phone uses the modem directly').format(st.siptitle || _('the SIP service')) :
 			(st.sipcall ? _('On, a SIP phone is on a call') : _('On')) ]);
 
 	if (st.running && st.dnd)

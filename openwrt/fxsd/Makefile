@@ -53,7 +53,7 @@ define Package/fxsd/install
 	$(INSTALL_BIN) ./files/fxs.defaults $(1)/etc/uci-defaults/90-fxs-at-port
 	$(INSTALL_DIR) $(1)/usr/share/fxs/sip/qmodem
 	$(INSTALL_DATA) $(PKG_BUILD_DIR)/sip/qmodem/info $(PKG_BUILD_DIR)/sip/qmodem/map $(1)/usr/share/fxs/sip/qmodem/
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/sip/qmodem/start $(PKG_BUILD_DIR)/sip/qmodem/stop $(PKG_BUILD_DIR)/sip/qmodem/status $(1)/usr/share/fxs/sip/qmodem/
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/sip/qmodem/start $(PKG_BUILD_DIR)/sip/qmodem/stop $(PKG_BUILD_DIR)/sip/qmodem/status $(PKG_BUILD_DIR)/sip/qmodem/setup $(1)/usr/share/fxs/sip/qmodem/
 endef
 
 $(eval $(call BuildPackage,fxsd))

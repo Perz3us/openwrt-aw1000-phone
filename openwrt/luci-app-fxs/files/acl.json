@@ -3,7 +3,7 @@
 		"description": "Grant access to the RJ11 phone port",
 		"read": {
 			"ubus": {
-				"fxs": [ "status", "version", "calls", "history", "backup" ]
+				"fxs": [ "status", "version", "calls", "history", "backup", "sip_services" ]
 			},
 			"uci": [ "fxs" ]
 		},
@@ -13,7 +13,7 @@
 				"/tmp/fxs-restore.json": [ "write" ]
 			},
 			"ubus": {
-				"fxs": [ "clear_guard", "set_enabled", "ring_test", "ring", "click_call", "restore", "clear_history", "delete_calls" ]
+				"fxs": [ "clear_guard", "set_enabled", "ring_test", "ring", "click_call", "restore", "set_sip", "clear_history", "delete_calls" ]
 			},
 			"uci": [ "fxs" ]
 		}

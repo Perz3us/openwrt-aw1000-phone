@@ -26,7 +26,7 @@ endef
 define Package/luci-app-fxs/install
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/fxs $(1)/usr/share/luci/menu.d \
 		$(1)/usr/share/rpcd/acl.d $(1)/usr/libexec/rpcd
-	$(INSTALL_DATA) ./files/phone.js ./files/history.js ./files/settings.js ./files/speeddial.js ./files/blocked.js \
+	$(INSTALL_DATA) ./files/phone.js ./files/history.js ./files/settings.js ./files/speeddial.js ./files/blocked.js ./files/sip.js \
 		$(1)/www/luci-static/resources/view/fxs/
 	$(INSTALL_DATA) ./files/menu.json $(1)/usr/share/luci/menu.d/luci-app-fxs.json
 	$(INSTALL_DATA) ./files/acl.json $(1)/usr/share/rpcd/acl.d/luci-app-fxs.json
