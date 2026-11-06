@@ -82,6 +82,7 @@ static char block[LIST_MAX][CLCC_NUM_MAX], allow[LIST_MAX][CLCC_NUM_MAX];
 static int nspeed, nblock, nallow;
 static int voice_off;
 static int sip_on, client, phone_off;
+static const char *sip_name = "";
 
 static void on_sig(int sig)
 {
@@ -426,8 +427,8 @@ static void op_dial(void *c, const char *num)
 			cmd[n++] = *num;
 	cmd[n] = 0;
 	if (client) {
-		if (voip_request("originate", cmd + 3)) {
-			msg(LOG_WARNING, "QModem voice did not accept the call");
+		if (voip_request("dial", cmd + 3)) {
+			msg(LOG_WARNING, "the SIP service did not accept the call");
 			d->line.seen_call = 1;
 		}
 		return;
@@ -443,7 +444,7 @@ static void op_answer(void *c)
 	if (!client)
 		at("ATA");
 	else if (voip_request("answer", NULL))
-		msg(LOG_WARNING, "QModem voice did not accept the answer");
+		msg(LOG_WARNING, "the SIP service did not accept the answer");
 }
 
 static void op_hangup(void *c)
@@ -453,7 +454,7 @@ static void op_hangup(void *c)
 	if (!client)
 		at("AT+CHUP");
 	else if (voip_request(d->line.state == LS_IDLE || d->line.state == LS_RINGING ? "reject" : "hangup", NULL))
-		msg(LOG_WARNING, "QModem voice did not accept the hangup");
+		msg(LOG_WARNING, "the SIP service did not accept the hangup");
 }
 
 static void op_chld(void *c, const char *arg)
@@ -472,7 +473,7 @@ static void op_dtmf(void *c, char digit)
 	(void)c;
 	if (client) {
 		if (voip_dtmf(digit))
-			msg(LOG_WARNING, "QModem voice did not accept digit %c", digit);
+			msg(LOG_WARNING, "the SIP service did not accept digit %c", digit);
 		return;
 	}
 	snprintf(cmd, sizeof(cmd), "AT+VTS=\"%c\"", digit);
@@ -1055,6 +1056,30 @@ static void poll_modem(struct fxsd *d, unsigned long now)
 	line_modem(&d->line, c, clcc_parse_all(r, c, CLCC_MAX), now);
 }
 
+static void sip_load(const char *dir)
+{
+	struct sipmap m;
+	char path[128];
+	const char *slash = strrchr(dir, '/');
+	FILE *f;
+	int bad;
+
+	sip_name = slash ? slash + 1 : dir;
+	snprintf(path, sizeof(path), "%s/map", dir);
+	if (!(f = fopen(path, "r"))) {
+		msg(LOG_WARNING, "SIP service map in %s is not valid", dir);
+		return;
+	}
+	bad = sipmap_load(&m, f);
+	fclose(f);
+	if (bad) {
+		msg(LOG_WARNING, "SIP service map in %s is not valid", dir);
+		return;
+	}
+	voip_service(&m);
+	sip_on = 1;
+}
+
 static void sip_tick(struct fxsd *d, unsigned long now, unsigned long *t_check)
 {
 	const struct voip_snap *v = voip_snap();
@@ -1077,8 +1102,8 @@ static void sip_tick(struct fxsd *d, unsigned long now, unsigned long *t_check)
 		d->line.gone_ms = client ? 0 : 3000;
 		d->sip_audio = 0;
 		apply_bridge(d);
-		msg(LOG_INFO, client ? "SIP calling on, calls go through QModem voice" :
-		    "QModem voice is not running, using the modem directly");
+		msg(LOG_INFO, client ? "SIP calling on, calls go through %s" :
+		    "%s is not running, using the modem directly", sip_name);
 		write_state(d);
 	}
 	if (client && voip_changed())
@@ -1121,13 +1146,13 @@ static int setup(struct fxsd *d, const struct si_patch *p, int gtx, int grx)
 
 static int usage(void)
 {
-	fprintf(stderr, "usage: fxsd -p PATCH [-c CHANNEL] [-g TXDB,RXDB] [-a ATPORT] [-l VOLUME] [-r RXGAIN] [-e LED] [-m READY,RINGING,OFFHOOK] [-b 0|1] [-i bellcore|etsi|dtmf|off] [-t before|after] [-k DAYS] [-w 0|1] [-s 0|1] [-n ON,OFF[,ON,OFF]] [-C 0|1] [-I 0|1] [-H NUMBER,SECONDS] [-F MIN,MAX] [-D SECONDS] [-o] [-f] [-v]\n");
+	fprintf(stderr, "usage: fxsd -p PATCH [-c CHANNEL] [-g TXDB,RXDB] [-a ATPORT] [-l VOLUME] [-r RXGAIN] [-e LED] [-m READY,RINGING,OFFHOOK] [-b 0|1] [-i bellcore|etsi|dtmf|off] [-t before|after] [-k DAYS] [-w 0|1] [-S SERVICE_DIR] [-n ON,OFF[,ON,OFF]] [-C 0|1] [-I 0|1] [-H NUMBER,SECONDS] [-F MIN,MAX] [-D SECONDS] [-o] [-f] [-v]\n");
 	return 2;
 }
 
 int main(int argc, char **argv)
 {
-	const char *patch = NULL, *numfmt = NULL;
+	const char *patch = NULL, *numfmt = NULL, *sip_dir = NULL;
 	struct fxsd d = { .ch = 1, .cid_mode = CID_BELLCORE, .phone = -1 };
 	struct si_patch p;
 	unsigned long t_modem = 0, t_hook = 0, t_ready, t_prune, t_voip, t_urc, t_alive = 0, t_cw;
@@ -1140,7 +1165,7 @@ int main(int argc, char **argv)
 	int ringback = 1, hd = 0;
 	char r[512];
 
-	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:s:n:q:u:C:I:H:F:D:ofv")) != -1) {
+	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:s:S:n:q:u:C:I:H:F:D:ofv")) != -1) {
 		switch (o) {
 		case 'p': patch = optarg; break;
 		case 'c': d.ch = atoi(optarg) & 1; break;
@@ -1155,7 +1180,8 @@ int main(int argc, char **argv)
 		case 't': d.cid_before = !strcmp(optarg, "rpas") ? 2 : !strcmp(optarg, "before"); break;
 		case 'k': keep_days = atoi(optarg); break;
 		case 'w': hd = atoi(optarg) == 1; break;
-		case 's': sip_on = atoi(optarg) == 1; break;
+		case 's': break;
+		case 'S': sip_dir = optarg; break;
 		case 'n': ring_parse(optarg); break;
 		case 'q': dnd_parse(optarg); break;
 		case 'u': numfmt = optarg; break;
@@ -1173,6 +1199,8 @@ int main(int argc, char **argv)
 	if (!patch)
 		return usage();
 	openlog("fxsd", LOG_PID | (fg ? LOG_PERROR : 0), LOG_DAEMON);
+	if (sip_dir)
+		sip_load(sip_dir);
 	if ((e = si_patch_load_file(patch, &p))) {
 		msg(LOG_ERR, "patch %s: %s", patch, strerror(-e));
 		return 1;

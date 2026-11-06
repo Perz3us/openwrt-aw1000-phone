@@ -10,14 +10,16 @@
 
 enum { F_STATE, F_ORIGIN, F_OWNER, F_NUMBER, F_ENABLED, F_MAX };
 
-static const struct blobmsg_policy policy[F_MAX] = {
-	[F_STATE] = { .name = "state", .type = BLOBMSG_TYPE_STRING },
-	[F_ORIGIN] = { .name = "origin", .type = BLOBMSG_TYPE_STRING },
-	[F_OWNER] = { .name = "answer_owner", .type = BLOBMSG_TYPE_STRING },
-	[F_NUMBER] = { .name = "remote_number", .type = BLOBMSG_TYPE_STRING },
-	[F_ENABLED] = { .name = "enabled", .type = BLOBMSG_TYPE_BOOL },
+static struct blobmsg_policy policy[F_MAX] = {
+	[F_STATE] = { .type = BLOBMSG_TYPE_STRING },
+	[F_ORIGIN] = { .type = BLOBMSG_TYPE_STRING },
+	[F_OWNER] = { .type = BLOBMSG_TYPE_STRING },
+	[F_NUMBER] = { .type = BLOBMSG_TYPE_STRING },
+	[F_ENABLED] = { .type = BLOBMSG_TYPE_BOOL },
 };
 
+static struct sipmap map;
+static int have_service;
 static struct ubus_context *ev_ctx, *req_ctx;
 static struct ubus_event_handler handler;
 static struct blob_buf buf;
@@ -25,9 +27,25 @@ static struct voip_snap snap;
 static uint32_t object;
 static int lost, changed;
 
+void voip_service(const struct sipmap *m)
+{
+	map = *m;
+	policy[F_STATE].name = sipmap_out(&map, SIPMAP_FIELD, "state");
+	policy[F_ORIGIN].name = sipmap_out(&map, SIPMAP_FIELD, "origin");
+	policy[F_OWNER].name = sipmap_out(&map, SIPMAP_FIELD, "answered_by");
+	policy[F_NUMBER].name = sipmap_out(&map, SIPMAP_FIELD, "number");
+	policy[F_ENABLED].name = sipmap_out(&map, SIPMAP_FIELD, "enabled");
+	have_service = 1;
+}
+
 static const char *str(struct blob_attr *a)
 {
 	return a ? blobmsg_get_string(a) : NULL;
+}
+
+static const char *ours(enum sipmap_kind k, struct blob_attr *a)
+{
+	return a ? sipmap_in(&map, k, blobmsg_get_string(a)) : NULL;
 }
 
 static void take(struct blob_attr *msg)
@@ -41,7 +59,8 @@ static void take(struct blob_attr *msg)
 	if (!tb[F_STATE])
 		return;
 	memset(&s, 0, sizeof(s));
-	voip_snap_set(&s, str(tb[F_STATE]), str(tb[F_ORIGIN]), str(tb[F_OWNER]), str(tb[F_NUMBER]),
+	voip_snap_set(&s, ours(SIPMAP_STATE, tb[F_STATE]), ours(SIPMAP_OWNER, tb[F_ORIGIN]),
+		      ours(SIPMAP_OWNER, tb[F_OWNER]), str(tb[F_NUMBER]),
 		      tb[F_ENABLED] ? blobmsg_get_bool(tb[F_ENABLED]) : 1);
 	if (memcmp(&s, &snap, sizeof(s))) {
 		snap = s;
@@ -73,6 +92,8 @@ static void on_lost(struct ubus_context *ctx)
 
 int voip_connect(void)
 {
+	if (!have_service)
+		return -1;
 	if (lost)
 		voip_disconnect();
 	if (!ev_ctx) {
@@ -80,7 +101,7 @@ int voip_connect(void)
 			return -1;
 		ev_ctx->connection_lost = on_lost;
 		handler.cb = on_event;
-		if (ubus_register_event_handler(ev_ctx, &handler, "qmodem_voip.call")) {
+		if (ubus_register_event_handler(ev_ctx, &handler, map.event)) {
 			voip_disconnect();
 			return -1;
 		}
@@ -90,7 +111,7 @@ int voip_connect(void)
 			return -1;
 		req_ctx->connection_lost = on_lost;
 	}
-	if (ubus_lookup_id(req_ctx, "qmodem_voip", &object))
+	if (ubus_lookup_id(req_ctx, map.object, &object))
 		return -1;
 	return voip_refresh();
 }
@@ -133,7 +154,7 @@ static int invoke(const char *method)
 
 	if (!req_ctx || !object || lost)
 		return -1;
-	e = ubus_invoke(req_ctx, object, method, buf.head, on_reply, NULL, CALL_TIMEOUT_MS);
+	e = ubus_invoke(req_ctx, object, sipmap_out(&map, SIPMAP_METHOD, method), buf.head, on_reply, NULL, CALL_TIMEOUT_MS);
 	if (e == UBUS_STATUS_NOT_FOUND || e == UBUS_STATUS_CONNECTION_FAILED)
 		object = 0;
 	return e ? -1 : 0;
@@ -145,12 +166,17 @@ int voip_refresh(void)
 	return invoke("status");
 }
 
-int voip_request(const char *method, const char *number)
+static void add_line(void)
 {
 	blob_buf_init(&buf, 0);
-	blobmsg_add_string(&buf, "endpoint", "rj11");
+	blobmsg_add_string(&buf, sipmap_out(&map, SIPMAP_ARG, "line"), sipmap_out(&map, SIPMAP_OWNER, "phone"));
+}
+
+int voip_request(const char *method, const char *number)
+{
+	add_line();
 	if (number)
-		blobmsg_add_string(&buf, "number", number);
+		blobmsg_add_string(&buf, sipmap_out(&map, SIPMAP_ARG, "number"), number);
 	return invoke(method);
 }
 
@@ -158,10 +184,9 @@ int voip_dtmf(char digit)
 {
 	char s[2] = { digit, 0 };
 
-	blob_buf_init(&buf, 0);
-	blobmsg_add_string(&buf, "endpoint", "rj11");
-	blobmsg_add_string(&buf, "digit", s);
-	return invoke("send_dtmf");
+	add_line();
+	blobmsg_add_string(&buf, sipmap_out(&map, SIPMAP_ARG, "digit"), s);
+	return invoke("digit");
 }
 
 const struct voip_snap *voip_snap(void)

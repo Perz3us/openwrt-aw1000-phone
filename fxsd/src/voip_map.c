@@ -7,9 +7,9 @@
 static enum voip_state state_of(const char *s)
 {
 	static const struct { const char *name; enum voip_state st; } map[] = {
-		{ "disabled", VS_DISABLED }, { "idle", VS_IDLE }, { "outgoing_setup", VS_SETUP },
-		{ "incoming_ringing", VS_RINGING }, { "early_media", VS_EARLY }, { "active", VS_ACTIVE },
-		{ "terminating", VS_ENDING },
+		{ "off", VS_DISABLED }, { "idle", VS_IDLE }, { "dialing", VS_SETUP },
+		{ "ringing", VS_RINGING }, { "alerting", VS_EARLY }, { "active", VS_ACTIVE },
+		{ "ending", VS_ENDING },
 	};
 	size_t i;
 
@@ -26,17 +26,17 @@ static int named(const char *s)
 
 static enum voip_owner owner_of(const char *s)
 {
-	if (!named(s) || !strcmp(s, "cellular"))
+	if (!named(s) || !strcmp(s, "network"))
 		return VO_NONE;
-	return strcmp(s, "rj11") ? VO_OTHER : VO_RJ11;
+	return strcmp(s, "phone") ? VO_OTHER : VO_RJ11;
 }
 
 void voip_snap_set(struct voip_snap *s, const char *state, const char *origin,
-		   const char *answer_owner, const char *number, int enabled)
+		   const char *answered_by, const char *number, int enabled)
 {
 	s->st = state_of(state);
-	s->answered = named(answer_owner);
-	s->owner = owner_of(s->answered ? answer_owner : origin);
+	s->answered = named(answered_by);
+	s->owner = owner_of(s->answered ? answered_by : origin);
 	s->enabled = enabled;
 	snprintf(s->number, sizeof(s->number), "%s", number ? number : "");
 }
