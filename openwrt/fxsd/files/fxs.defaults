@@ -4,4 +4,15 @@
 	uci set fxs.main.at_port='auto'
 	uci commit fxs
 }
+
+old=$(uci -q get fxs.main.sip)
+if [ -n "$old" ]; then
+	[ -n "$(uci -q get fxs.main.sip_enabled)" ] || uci -q set fxs.main.sip_enabled="$old"
+	uci -q delete fxs.main.sip
+	uci -q commit fxs
+fi
+if [ -z "$(uci -q get fxs.main.sip_service)" ]; then
+	uci -q set fxs.main.sip_service='qmodem'
+	uci -q commit fxs
+fi
 exit 0

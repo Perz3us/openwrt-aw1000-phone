@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 perz3us
+object qmodem_voip
+event qmodem_voip.call
+audio 8000
+method dial originate
+method digit send_dtmf
+arg line endpoint
+field answered_by answer_owner
+field number remote_number
+state off disabled
+state dialing outgoing_setup
+state alerting early_media
+state ringing incoming_ringing
+state ending terminating
+owner phone rj11
+owner network cellular

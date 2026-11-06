@@ -1166,7 +1166,7 @@ int main(int argc, char **argv)
 	int ringback = 1, hd = 0;
 	char r[512];
 
-	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:s:S:n:q:u:C:I:H:F:D:ofv")) != -1) {
+	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:S:n:q:u:C:I:H:F:D:ofv")) != -1) {
 		switch (o) {
 		case 'p': patch = optarg; break;
 		case 'c': d.ch = atoi(optarg) & 1; break;
@@ -1181,7 +1181,6 @@ int main(int argc, char **argv)
 		case 't': d.cid_before = !strcmp(optarg, "rpas") ? 2 : !strcmp(optarg, "before"); break;
 		case 'k': keep_days = atoi(optarg); break;
 		case 'w': hd = atoi(optarg) == 1; break;
-		case 's': break;
 		case 'S': sip_dir = optarg; break;
 		case 'n': ring_parse(optarg); break;
 		case 'q': dnd_parse(optarg); break;

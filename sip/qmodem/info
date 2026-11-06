@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 perz3us
+TITLE="QModem voice"
+PACKAGE=qmodem-voip
+URL=https://github.com/FUjr/QModem

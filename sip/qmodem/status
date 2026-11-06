@@ -1,0 +1,11 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 perz3us
+
+if [ ! -x /etc/init.d/qmodem_voip ]; then
+	echo not-installed
+elif /etc/init.d/qmodem_voip running; then
+	echo running
+else
+	echo stopped
+fi

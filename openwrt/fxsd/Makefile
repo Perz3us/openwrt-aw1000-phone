@@ -24,7 +24,7 @@ define Package/fxsd/description
   Runs the RJ11 phone port of the Arcadyan AW1000: SLIC bring-up, dial tone,
   ringing, DTMF dialing and modem call control (through at-daemon if
   installed, otherwise directly on the AT port), with
-  optional SIP calling through QModem voice.
+  optional SIP calling through a SIP service add-on.
 endef
 
 define Package/fxsd/conffiles
@@ -35,6 +35,7 @@ endef
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)/fxsd $(PKG_BUILD_DIR)/kernel/aw1000-fxs
 	$(CP) $(FXS_ROOT)/fxsd/src $(FXS_ROOT)/fxsd/Makefile $(PKG_BUILD_DIR)/fxsd/
+	$(CP) $(FXS_ROOT)/sip $(PKG_BUILD_DIR)/
 	$(CP) $(FXS_ROOT)/kernel/aw1000-fxs/fxs_uapi.h $(PKG_BUILD_DIR)/kernel/aw1000-fxs/
 endef
 
@@ -50,6 +51,9 @@ define Package/fxsd/install
 	$(INSTALL_BIN) ./files/fxsd.init $(1)/etc/init.d/fxsd
 	$(INSTALL_CONF) ./files/fxs.config $(1)/etc/config/fxs
 	$(INSTALL_BIN) ./files/fxs.defaults $(1)/etc/uci-defaults/90-fxs-at-port
+	$(INSTALL_DIR) $(1)/usr/share/fxs/sip/qmodem
+	$(INSTALL_DATA) $(PKG_BUILD_DIR)/sip/qmodem/info $(PKG_BUILD_DIR)/sip/qmodem/map $(1)/usr/share/fxs/sip/qmodem/
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/sip/qmodem/start $(PKG_BUILD_DIR)/sip/qmodem/stop $(PKG_BUILD_DIR)/sip/qmodem/status $(1)/usr/share/fxs/sip/qmodem/
 endef
 
 $(eval $(call BuildPackage,fxsd))

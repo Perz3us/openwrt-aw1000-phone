@@ -1,0 +1,8 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 perz3us
+
+[ -x /etc/init.d/qmodem_voip_sipd ] || exit 0
+/etc/init.d/qmodem_voip_sipd enabled && /etc/init.d/qmodem_voip_sipd disable
+/etc/init.d/qmodem_voip_sipd running && /etc/init.d/qmodem_voip_sipd stop
+exit 0
