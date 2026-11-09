@@ -1,0 +1,11 @@
+#!/bin/sh
+
+ip=$(uci -q get network.lan.ipaddr | awk '{ print $1 }')
+port=$(uci -q get qmodem_sip.inbound.listen_port)
+transport=udp
+[ "$(uci -q get qmodem_sip.inbound.transport)" = tcp ] && transport=tcp
+echo "host=${ip%%/*}"
+echo "port=${port:-5060}"
+echo "user=$(uci -q get qmodem_sip.inbound.username)"
+echo "password=$(uci -q get qmodem_sip.inbound.password)"
+echo "transport=$transport"

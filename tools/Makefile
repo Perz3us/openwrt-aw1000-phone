@@ -5,3 +5,7 @@ endif
 build/fxsctl: fxsctl.c ../kernel/aw1000-fxs/fxs_uapi.h
 	mkdir -p build
 	$(CC) -O2 -Wall -o $@ fxsctl.c
+
+build/pcm-probe: pcm-probe.c
+	mkdir -p build
+	$(CC) -O2 -Wall -o $@ pcm-probe.c

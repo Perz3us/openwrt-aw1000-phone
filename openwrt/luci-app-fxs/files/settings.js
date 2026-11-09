@@ -1,6 +1,8 @@
 'use strict';
 'require view';
+'require fxs.tabs';
 'require form';
+'require uci';
 
 return view.extend({
 	render: function() {
@@ -11,7 +13,6 @@ return view.extend({
 		s = m.section(form.NamedSection, 'main', 'fxs');
 		s.tab('general', _('General'));
 		s.tab('calling', _('Calling'));
-		s.tab('dnd', _('Do not disturb'));
 		s.tab('history', _('Call history'));
 		s.tab('led', _('LED'));
 		s.tab('advanced', _('Advanced'));
@@ -117,15 +118,35 @@ return view.extend({
 		o.default = '1';
 		o.rmempty = false;
 
-		o = s.taboption('calling', form.Flag, 'hide_number', _('Hide my number'),
-			_('Call without showing your number. To change it for one call, dial *67 (hide) or *82 (show) before the number. Emergency numbers are never hidden.'));
-		o.default = '0';
-		o.rmempty = false;
-
 		o = s.taboption('calling', form.Value, 'dial_wait', _('Dial wait (seconds)'),
 			_('The call starts this long after the last digit. Pressing # starts it right away.'));
 		o.datatype = 'range(2,15)';
 		o.placeholder = '4';
+
+		[
+			[ 'code_redial', _('Redial code'), _('Dial this on the phone to call the last number you dialed.'), '*66', 'code_callback', '*69' ],
+			[ 'code_callback', _('Call back code'), _('Dial this on the phone to call the last person who called you.'), '*69', 'code_redial', '*66' ]
+		].forEach(function(c) {
+			o = s.taboption('calling', form.Value, c[0], c[1],
+				c[2] + ' ' + _('A * and 1 to 6 digits. A speed dial with the same code goes first.'));
+			o.placeholder = c[3];
+			o.validate = function(section_id, value) {
+				if (!value)
+					return true;
+				if (!/^\*[0-9]{1,6}$/.test(value))
+					return _('Enter a * and 1 to 6 digits, like %s').format(c[3]);
+				if (value == '*86' || value == (uci.get('fxs', 'main', 'code_dnd_on') || '*78') || value == (uci.get('fxs', 'main', 'code_dnd_off') || '*79'))
+					return _('The phone already uses this code');
+				if (value == (this.section.formvalue(section_id, c[4]) || c[5]))
+					return _('Redial and call back need different codes');
+				return true;
+			};
+		});
+
+		o = s.taboption('calling', form.Flag, 'missed_tone', _('Missed call tone'),
+			_('After a missed call, the dial tone stutters for a moment the next time you lift the handset.'));
+		o.default = '0';
+		o.rmempty = false;
 
 		o = s.taboption('calling', form.Flag, 'hotline_enabled', _('Call when handset is lifted'),
 			_('Lifting the handset calls one number by itself. Pressing any key before that gives a normal call. Useful for an older person, a gate or a shop counter.'));
@@ -163,41 +184,6 @@ return view.extend({
 			return !value || +value >= min + 100 ? true : _('Must be at least 100 ms above the shortest flash');
 		};
 
-		o = s.taboption('dnd', form.Flag, 'dnd', _('Do not disturb'),
-			_('The RJ11 phone does not ring during these hours. Calls still show in the call history as missed, and SIP phones still ring. Numbers in the allowed list always ring.'));
-		o.default = '0';
-		o.rmempty = false;
-
-		o = s.taboption('dnd', form.Flag, 'dnd_allday', _('All day'),
-			_('Keep do not disturb on all the time instead of only during set hours.'));
-		o.default = '0';
-		o.depends('dnd', '1');
-
-		[ [ 'dnd_from', _('From'), '22:00' ], [ 'dnd_to', _('Until'), '07:00' ] ].forEach(function(t) {
-			o = s.taboption('dnd', form.Value, t[0], t[1]);
-			o.placeholder = t[2];
-			o.default = t[2];
-			o.depends({ dnd: '1', dnd_allday: '0' });
-			o.validate = function(section_id, value) {
-				return !value || /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value) ? true : _('Enter a time like 22:00');
-			};
-		});
-
-		o = s.taboption('dnd', form.Value, 'dnd_repeat', _('Ring on a repeat call within (minutes)'),
-			_('If the same number calls again within this time, the phone rings, so urgent calls get through. 0 turns this off.'));
-		o.datatype = 'range(0,60)';
-		o.placeholder = '3';
-		o.default = '3';
-		o.depends('dnd', '1');
-
-		o = s.taboption('dnd', form.DynamicList, 'dnd_allow', _('Always ring for'),
-			_('Calls from these numbers ring even during do not disturb.'));
-		o.placeholder = '0771234567';
-		o.depends('dnd', '1');
-		o.validate = function(section_id, value) {
-			return !value || /^\+?[0-9]{3,20}$/.test(value) ? true : _('Enter a phone number');
-		};
-
 		o = s.taboption('history', form.Flag, 'history_autodelete', _('Delete old calls'),
 			_('Remove calls from the call history once they are older than the number of days below.'));
 		o.default = '0';
@@ -216,12 +202,14 @@ return view.extend({
 		[
 			[ 'led_ready', _('Line ready'), 'on' ],
 			[ 'led_ringing', _('Incoming call'), 'fast' ],
-			[ 'led_offhook', _('Handset off hook'), 'slow' ]
+			[ 'led_offhook', _('Handset off hook'), 'slow' ],
+			[ 'led_quiet', _('Quiet or do not disturb'), 'blip' ]
 		].forEach(function(l) {
 			o = s.taboption('led', form.ListValue, l[0], l[1]);
 			o.value('on', _('Solid'));
 			o.value('slow', _('Slow blink'));
 			o.value('fast', _('Fast blink'));
+			o.value('blip', _('Short flash every 2 seconds'));
 			o.value('off', _('Off'));
 			o.default = l[2];
 		});

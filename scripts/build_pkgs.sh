@@ -7,6 +7,8 @@ set -e
 SDK=$(ls -d /cache/openwrt-sdk-*/ | head -1)
 SDK=${SDK%/}
 VERMAGIC=$1
+SRC_EPOCH=$(git -C /work log -1 --format=%ct 2>/dev/null || true)
+[ -z "$SRC_EPOCH" ] || export SOURCE_DATE_EPOCH="$SRC_EPOCH"
 cd "$SDK"
 command -v make >/dev/null || { apt-get update -qq && apt-get install -y -qq make gcc g++ python3 file rsync libncurses-dev gawk unzip bzip2 xz-utils zstd bison flex >/dev/null; }
 command -v rsync >/dev/null || { apt-get update -qq && apt-get install -y -qq rsync gawk python3 file bison flex libncurses-dev >/dev/null; }
@@ -34,6 +36,7 @@ make package/feeds/aw1000/aw1000-fxs/clean >/dev/null 2>&1 || true
 make package/feeds/aw1000/aw1000-fxs/compile $KOPT -j4 || make package/feeds/aw1000/aw1000-fxs/compile $KOPT V=s
 make package/feeds/aw1000/fxsd/clean >/dev/null 2>&1 || true
 make package/feeds/aw1000/fxsd/compile -j4 || make package/feeds/aw1000/fxsd/compile V=s
+make package/feeds/aw1000/luci-app-fxs/clean >/dev/null 2>&1 || true
 make package/feeds/aw1000/luci-app-fxs/compile -j4 || make package/feeds/aw1000/luci-app-fxs/compile V=s
 
 mkdir -p /work/dist

@@ -1,0 +1,11 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 perz3us
+
+if [ ! -e /usr/libexec/rpcd/fxs_sip ]; then
+	echo not-installed
+elif [ -f /tmp/fxs-example/state ] && ! grep -q '^off ' /tmp/fxs-example/state; then
+	echo running
+else
+	echo stopped
+fi

@@ -35,6 +35,78 @@ add_allow() {
 	echo "$1" >> /var/run/fxsd.allow
 }
 
+add_quiet() {
+	local enabled days from to mode action name
+
+	config_get_bool enabled "$1" enabled 1
+	[ "$enabled" = 1 ] || return 0
+	config_get days "$1" days
+	config_get from "$1" from
+	config_get to "$1" to
+	config_get mode "$1" mode repeat
+	config_get action "$1" action silent
+	config_get name "$1" name
+	[ -n "$days" ] && [ -n "$from" ] && [ -n "$to" ] || return 0
+	echo "W $(echo $days | tr ' ' ',') $from $to $mode $action $name" >> /var/run/fxsd.quiet
+}
+
+add_holiday() {
+	local enabled first last from to mode action name
+
+	config_get_bool enabled "$1" enabled 1
+	[ "$enabled" = 1 ] || return 0
+	config_get first "$1" from_date
+	config_get last "$1" to_date "$first"
+	config_get from "$1" from 00:00
+	config_get to "$1" to 00:00
+	config_get mode "$1" mode allowed
+	config_get action "$1" action silent
+	config_get name "$1" name
+	[ -n "$first" ] || return 0
+	echo "H $first $last $from $to $mode $action $name" >> /var/run/fxsd.quiet
+}
+
+add_contact() {
+	local number ring name priority
+
+	config_get number "$1" number
+	config_get ring "$1" ring default
+	config_get priority "$1" priority normal
+	config_get name "$1" name
+	[ -n "$number" ] && printf '%s\t%s\t%s\t%s\n' "$number" "$ring" "$priority" "$name" >> /var/run/fxsd.contacts
+}
+
+add_alarm() {
+	local enabled time days seconds
+
+	config_get_bool enabled "$1" enabled 1
+	[ "$enabled" = 1 ] || return 0
+	config_get time "$1" time
+	config_get days "$1" days
+	config_get seconds "$1" seconds 60
+	[ -n "$time" ] && [ -n "$days" ] || return 0
+	echo "$(echo $days | tr ' ' ',') $time $seconds" >> /var/run/fxsd.alarms
+}
+
+add_recnum() {
+	local rule number enabled
+
+	config_get_bool enabled "$1" enabled 1
+	[ "$enabled" = 1 ] || return 0
+	config_get rule "$1" rule never
+	config_get number "$1" number
+	case "$rule" in
+	always|never) [ -n "$number" ] && echo "rule=$rule $number" >> /var/run/fxsd.rec ;;
+	esac
+}
+
+add_outgoing() {
+	local prefix
+
+	config_get prefix "$1" prefix
+	[ -n "$prefix" ] && echo "$prefix" >> /var/run/fxsd.outgoing
+}
+
 sip_pick() {
 	local sip sip_enabled sip_service
 
@@ -67,14 +139,17 @@ sip_stop_others() {
 
 start_service() {
 	local enabled channel tx_gain rx_gain at_port volume modem_rx_gain patch led ringback callerid block_private
-	local history_autodelete history_days callerid_timing led_ready led_ringing led_offhook hd sip_dir sip_arg off
+	local history_autodelete history_days callerid_timing led_ready led_ringing led_offhook led_quiet hd sip_dir sip_arg off
 	local ring_pattern ring_on ring_off ring callerid_format callerid_country callerid_prefix numfmt
-	local call_waiting hide_number voicemail hotline_enabled hotline hotline_delay flash_min flash_max dial_wait hot
+	local call_waiting voicemail hotline_enabled hotline hotline_delay flash_min flash_max dial_wait hot
+	local code_redial code_callback
 
 	config_load fxs
 	config_get_bool enabled main enabled 1
 	sip_pick
 	sip_stop_others
+	[ -x /usr/libexec/fxs-sip-vpn ] && /usr/libexec/fxs-sip-vpn apply >/dev/null 2>&1
+	[ -x /usr/libexec/fxs-sip-qr ] && /usr/libexec/fxs-sip-qr clean
 	off=
 	if [ "$enabled" != 1 ]; then
 		[ -n "$sip_dir" ] || return 0
@@ -91,6 +166,7 @@ start_service() {
 	config_get led_ready main led_ready on
 	config_get led_ringing main led_ringing fast
 	config_get led_offhook main led_offhook slow
+	config_get led_quiet main led_quiet blip
 	config_get_bool ringback main ringback 1
 	config_get_bool hd main hd 0
 	config_get callerid main callerid bellcore
@@ -112,16 +188,12 @@ start_service() {
 	config_get_bool history_autodelete main history_autodelete 0
 	config_get history_days main history_days 30
 	[ "$history_autodelete" = 1 ] || history_days=0
-	config_get_bool dnd main dnd 0
-	config_get dnd_from main dnd_from 22:00
-	config_get dnd_to main dnd_to 07:00
 	config_get dnd_repeat main dnd_repeat 3
-	config_get_bool dnd_allday main dnd_allday 0
-	[ "$dnd_allday" = 1 ] && dnd_from=00:00 && dnd_to=00:00
-	quiet=off
-	[ "$dnd" = 1 ] && quiet="$dnd_from,$dnd_to,$dnd_repeat"
+	config_get_bool missed_tone main missed_tone 0
+	config_get_bool mqtt main mqtt 0
+	config_get code_dnd_on main code_dnd_on '*78'
+	config_get code_dnd_off main code_dnd_off '*79'
 	config_get_bool call_waiting main call_waiting 1
-	config_get_bool hide_number main hide_number 0
 	config_get voicemail main voicemail
 	config_get_bool hotline_enabled main hotline_enabled 0
 	config_get hotline main hotline
@@ -129,6 +201,8 @@ start_service() {
 	config_get flash_min main flash_min 80
 	config_get flash_max main flash_max 700
 	config_get dial_wait main dial_wait 4
+	config_get code_redial main code_redial '*66'
+	config_get code_callback main code_callback '*69'
 	hot=
 	[ "$hotline_enabled" = 1 ] && [ -n "$hotline" ] && hot="-H $hotline,$hotline_delay"
 
@@ -151,6 +225,22 @@ start_service() {
 	config_get_bool block_private main block_private 0
 	[ "$block_private" = 1 ] && echo private >> /var/run/fxsd.block
 	config_list_foreach main dnd_allow add_allow
+	config_get out_mode main out_mode off
+	echo "$out_mode" > /var/run/fxsd.outgoing
+	config_foreach add_outgoing outgoing
+	: > /var/run/fxsd.contacts
+	config_foreach add_contact contact
+	: > /var/run/fxsd.alarms
+	config_foreach add_alarm alarm
+	: > /var/run/fxsd.quiet
+	config_foreach add_quiet quiet
+	config_foreach add_holiday holiday
+	config_get rec_mode main rec_mode off
+	config_get rec_format main rec_format stereo
+	config_get rec_flash_mb main rec_flash_mb 50
+	config_get rec_usb_mb main rec_usb_mb 1000
+	printf 'mode=%s\nformat=%s\nflash_mb=%s\nusb_mb=%s\n' "$rec_mode" "$rec_format" "$rec_flash_mb" "$rec_usb_mb" > /var/run/fxsd.rec
+	config_foreach add_recnum recnum
 
 	mkdir -p /etc/fxs
 	cat /proc/sys/kernel/random/boot_id > "$GUARD"
@@ -167,11 +257,18 @@ start_service() {
 
 	procd_open_instance
 	procd_set_param command /usr/sbin/fxsd -p "$patch" -c "$channel" -g "$tx_gain,$rx_gain" \
-		-a "$at_port" -l "$volume" -r "$modem_rx_gain" -e "$led" -m "$led_ready,$led_ringing,$led_offhook" -b "$ringback" -i "$callerid" -t "$callerid_timing" -k "$history_days" -w "$hd" -n "$ring" -q "$quiet" -u "$numfmt" \
-		-C "$call_waiting" -I "$hide_number" -F "$flash_min,$flash_max" -D "$dial_wait" $hot $sip_arg $off
-	procd_set_param file /usr/sbin/fxsd /var/run/fxsd.speed /var/run/fxsd.block /var/run/fxsd.allow
+		-a "$at_port" -l "$volume" -r "$modem_rx_gain" -e "$led" -m "$led_ready,$led_ringing,$led_offhook,$led_quiet" -b "$ringback" -i "$callerid" -t "$callerid_timing" -k "$history_days" -w "$hd" -n "$ring" -q "$dnd_repeat" -u "$numfmt" \
+		-C "$call_waiting" -F "$flash_min,$flash_max" -D "$dial_wait" -R "$code_redial,$code_callback" -O "$code_dnd_on,$code_dnd_off" -M "$missed_tone" -T "$mqtt" $hot $sip_arg $off
+	procd_set_param file /usr/sbin/fxsd /var/run/fxsd.speed /var/run/fxsd.block /var/run/fxsd.allow /var/run/fxsd.outgoing /var/run/fxsd.quiet /var/run/fxsd.contacts /var/run/fxsd.alarms /var/run/fxsd.rec
 	procd_set_param respawn 3600 10 5
 	procd_close_instance
+
+	if [ "$mqtt" = 1 ] && command -v mosquitto_sub >/dev/null 2>&1; then
+		procd_open_instance mqtt
+		procd_set_param command /usr/libexec/fxs-mqtt listen
+		procd_set_param respawn 3600 30 0
+		procd_close_instance
+	fi
 }
 
 service_triggers() {

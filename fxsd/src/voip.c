@@ -155,8 +155,11 @@ static int invoke(const char *method)
 	if (!req_ctx || !object || lost)
 		return -1;
 	e = ubus_invoke(req_ctx, object, sipmap_out(&map, SIPMAP_METHOD, method), buf.head, on_reply, NULL, CALL_TIMEOUT_MS);
-	if (e == UBUS_STATUS_NOT_FOUND || e == UBUS_STATUS_CONNECTION_FAILED)
+	if (e == UBUS_STATUS_NOT_FOUND || e == UBUS_STATUS_CONNECTION_FAILED) {
 		object = 0;
+		memset(&snap, 0, sizeof(snap));
+		changed = 1;
+	}
 	return e ? -1 : 0;
 }
 

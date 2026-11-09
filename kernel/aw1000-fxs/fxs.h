@@ -12,6 +12,7 @@
 #include "fxs_uapi.h"
 
 #define FXS_AU_RING	4096
+#define FXS_REC_RING	16384
 
 struct platform_device;
 
@@ -46,6 +47,12 @@ struct fxs_dev {
 	u32 au_under, au_over, au_drop;
 	bool au_open;
 
+	spinlock_t rec_lock;
+	wait_queue_head_t recq;
+	u32 *rec;
+	u32 rec_head, rec_tail, rec_drop;
+	bool rec_on, rec_open;
+
 	u32 save[32];
 	bool clk_on, pll_on, adss_on, pcm_on, pins_on, spi_on, spi_drv_set;
 };
@@ -62,6 +69,9 @@ u32 fxs_au_avail(struct fxs_dev *d);
 u32 fxs_au_period(struct fxs_dev *d);
 u32 fxs_au_read(struct fxs_dev *d, u32 *buf, u32 max);
 void fxs_au_write(struct fxs_dev *d, const u32 *buf, u32 n);
+void fxs_rec_set(struct fxs_dev *d, bool on);
+u32 fxs_rec_avail(struct fxs_dev *d);
+u32 fxs_rec_read(struct fxs_dev *d, u32 *buf, u32 max);
 int fxs_spi_init(struct fxs_dev *d);
 void fxs_spi_exit(struct fxs_dev *d);
 void fxs_slic_reset(struct fxs_dev *d, bool assert);

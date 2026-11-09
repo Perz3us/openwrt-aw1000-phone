@@ -30,6 +30,15 @@
 		}
 	},
 
+	"admin/services/fxs/recording": {
+		"title": "Recording",
+		"order": 17,
+		"action": {
+			"type": "view",
+			"path": "fxs/recording"
+		}
+	},
+
 	"admin/services/fxs/settings": {
 		"title": "Settings",
 		"order": 20,
@@ -63,6 +72,60 @@
 		"action": {
 			"type": "view",
 			"path": "fxs/blocked"
+		}
+	},
+
+	"admin/services/fxs/outgoing": {
+		"title": "Outgoing calls",
+		"order": 45,
+		"action": {
+			"type": "view",
+			"path": "fxs/outgoing"
+		}
+	},
+
+	"admin/services/fxs/services": {
+		"title": "Phone services",
+		"order": 28,
+		"action": {
+			"type": "view",
+			"path": "fxs/services"
+		}
+	},
+
+	"admin/services/fxs/quiet": {
+		"title": "Do not disturb",
+		"order": 27,
+		"action": {
+			"type": "view",
+			"path": "fxs/quiet"
+		}
+	},
+
+	"admin/services/fxs/contacts": {
+		"title": "Phonebook",
+		"order": 26,
+		"action": {
+			"type": "view",
+			"path": "fxs/contacts"
+		}
+	},
+
+	"admin/services/fxs/alarms": {
+		"title": "Alarm calls",
+		"order": 29,
+		"action": {
+			"type": "view",
+			"path": "fxs/alarms"
+		}
+	},
+
+	"admin/services/fxs/mqtt": {
+		"title": "MQTT",
+		"order": 50,
+		"action": {
+			"type": "view",
+			"path": "fxs/mqtt"
 		}
 	}
 }

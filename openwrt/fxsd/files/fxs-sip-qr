@@ -1,0 +1,84 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 perz3us
+
+SIP_ROOT=${SIP_ROOT:-/usr/share/fxs/sip}
+PROV=${PROV:-/www/fxs-prov}
+KEEP=${KEEP:-300}
+
+esc() {
+	printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&apos;/g"
+}
+
+clean() {
+	rm -f "$PROV"/*.xml
+}
+
+make() {
+	local s dir acc host port user pass transport name f
+
+	s=$(uci -q get fxs.main.sip_service || echo qmodem)
+	case "$s" in
+	''|*[!a-z0-9_-]*) echo "need=Choose a SIP service first."; return 1 ;;
+	esac
+	dir=$SIP_ROOT/$s
+	[ "$(uci -q get fxs.main.sip_enabled || uci -q get fxs.main.sip || echo 0)" = 1 ] ||
+		{ echo "need=Turn on SIP first."; return 1; }
+	[ -x "$dir/account" ] || { echo "need=This SIP service cannot set up phone apps with a QR code."; return 1; }
+	acc=$("$dir/account" 2>/dev/null)
+	host=$(echo "$acc" | sed -n 's/^host=//p')
+	port=$(echo "$acc" | sed -n 's/^port=//p')
+	user=$(echo "$acc" | sed -n 's/^user=//p')
+	pass=$(echo "$acc" | sed -n 's/^password=//p')
+	transport=$(echo "$acc" | sed -n 's/^transport=//p')
+	[ -n "$user" ] && [ -n "$pass" ] || { echo "need=The SIP service needs an account name and a password."; return 1; }
+	case "$host" in
+	''|*[!A-Za-z0-9.:-]*) echo "need=The router's address could not be found."; return 1 ;;
+	esac
+	case "$port" in
+	''|*[!0-9]*) port=5060 ;;
+	esac
+	[ "$transport" = tcp ] || transport=udp
+
+	clean
+	mkdir -p "$PROV"
+	[ -f "$PROV/index.html" ] || : > "$PROV/index.html"
+	name=$(tr -dc 0-9a-f < /dev/urandom 2>/dev/null | head -c 32)
+	[ "${#name}" = 32 ] || { echo "need=Could not make a random file name."; return 1; }
+	f=$PROV/$name.xml
+	umask 022
+	cat > "$f" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns="http://www.linphone.org/xsds/lpconfig.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.linphone.org/xsds/lpconfig.xsd lpconfig.xsd">
+  <section name="proxy_0">
+    <entry name="reg_proxy" overwrite="true">$(esc "<sip:$host:$port;transport=$transport>")</entry>
+    <entry name="reg_identity" overwrite="true">$(esc "<sip:$user@$host>")</entry>
+    <entry name="reg_expires" overwrite="true">3600</entry>
+    <entry name="reg_sendregister" overwrite="true">1</entry>
+  </section>
+  <section name="auth_info_0">
+    <entry name="username" overwrite="true">$(esc "$user")</entry>
+    <entry name="passwd" overwrite="true">$(esc "$pass")</entry>
+    <entry name="domain" overwrite="true">$(esc "$host")</entry>
+  </section>
+</config>
+EOF
+	chmod 0644 "$f"
+	( sleep "$KEEP"; rm -f "$f" ) >/dev/null 2>&1 </dev/null &
+	echo "url=http://$host/${PROV##*/}/$name.xml"
+	echo "expires=$KEEP"
+	echo "server=$host:$port"
+	echo "user=$user"
+	[ "$(uci -q get uhttpd.main.redirect_https)" = 1 ] &&
+		echo "note=The router sends web pages over https with its own certificate. If the app cannot load the setup, turn off the https redirect in LuCI under System > Administration, or enter the account by hand."
+	return 0
+}
+
+case "$1" in
+make) make ;;
+clean) clean ;;
+*)
+	echo "usage: fxs-sip-qr make|clean" >&2
+	exit 2
+	;;
+esac

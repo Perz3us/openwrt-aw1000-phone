@@ -213,6 +213,56 @@ void fxs_au_write(struct fxs_dev *d, const u32 *buf, u32 n)
 	spin_unlock(&d->au_lock);
 }
 
+#define REC_MASK	(FXS_REC_RING - 1)
+
+void fxs_rec_set(struct fxs_dev *d, bool on)
+{
+	spin_lock(&d->rec_lock);
+	d->rec_head = d->rec_tail = 0;
+	if (on)
+		d->rec_drop = 0;
+	WRITE_ONCE(d->rec_on, on);
+	spin_unlock(&d->rec_lock);
+	wake_up_interruptible(&d->recq);
+}
+
+u32 fxs_rec_avail(struct fxs_dev *d)
+{
+	u32 n;
+
+	spin_lock(&d->rec_lock);
+	n = d->rec_head - d->rec_tail;
+	spin_unlock(&d->rec_lock);
+	return n;
+}
+
+u32 fxs_rec_read(struct fxs_dev *d, u32 *buf, u32 max)
+{
+	u32 n = 0;
+
+	spin_lock(&d->rec_lock);
+	while (n < max && d->rec_tail != d->rec_head)
+		buf[n++] = d->rec[d->rec_tail++ & REC_MASK];
+	spin_unlock(&d->rec_lock);
+	return n;
+}
+
+static void rec_push(struct fxs_dev *d, u16 modem, u16 phone)
+{
+	u32 n;
+
+	spin_lock(&d->rec_lock);
+	if (d->rec_head - d->rec_tail == FXS_REC_RING) {
+		d->rec_tail++;
+		d->rec_drop++;
+	}
+	d->rec[d->rec_head++ & REC_MASK] = modem | (u32)phone << 16;
+	n = d->rec_head - d->rec_tail;
+	spin_unlock(&d->rec_lock);
+	if (n >= 160)
+		wake_up_interruptible(&d->recq);
+}
+
 static u32 au_swap(struct fxs_dev *d, u16 a, u16 b, u32 *ready)
 {
 	u32 o = 0;
@@ -291,6 +341,8 @@ static int br_thread(void *arg)
 			b = br_get(in, bits, d->br_bi);
 			d->br_peak_a = max_t(u32, d->br_peak_a, abs((s16)a));
 			d->br_peak_b = max_t(u32, d->br_peak_b, abs((s16)b));
+			if (READ_ONCE(d->rec_on) && !d->br_user)
+				rec_push(d, a, b);
 			if (d->br_user) {
 				u32 ready, o = au_swap(d, a, b, &ready);
 
@@ -324,6 +376,7 @@ int fxs_pcm_bridge(struct fxs_dev *d, u32 arg)
 	}
 	WRITE_ONCE(d->br_user, 0);
 	wake_up_interruptible(&d->auq);
+	wake_up_interruptible(&d->recq);
 	if (!(arg & BIT(31)))
 		return 0;
 	if (!d->pcm_on || max(max(ai, ao), max(bi, bo)) > 48)

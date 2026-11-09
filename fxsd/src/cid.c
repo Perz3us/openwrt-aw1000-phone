@@ -101,14 +101,29 @@ static int put2(uint8_t *p, int v)
 	return 2;
 }
 
-int cid_mdmf(const char *number, const struct tm *t, uint8_t *out, size_t max)
+size_t cid_name_ascii(const char *utf8, char *out, size_t max)
 {
-	size_t n = strlen(number), len = 0, i;
+	size_t n = 0;
+
+	if (!max)
+		return 0;
+	for (; *utf8 && n + 1 < max; utf8++)
+		if ((unsigned char)*utf8 >= 0x20 && (unsigned char)*utf8 < 0x7f)
+			out[n++] = *utf8;
+	out[n] = 0;
+	return n;
+}
+
+int cid_mdmf(const char *number, const char *name, const struct tm *t, uint8_t *out, size_t max)
+{
+	size_t n = strlen(number), nm = name ? strlen(name) : 0, len = 0, i;
 	uint8_t sum = 0, *p = out + 2;
 
 	if (n > 20)
 		n = 20;
-	if (max < 2 + 10 + 2 + 20 + 1)
+	if (nm > 32)
+		nm = 32;
+	if (max < 2 + 10 + 2 + 20 + 2 + 32 + 1)
 		return -ENOSPC;
 	*p++ = 0x01;
 	*p++ = 8;
@@ -125,6 +140,12 @@ int cid_mdmf(const char *number, const struct tm *t, uint8_t *out, size_t max)
 		*p++ = 0x04;
 		*p++ = 1;
 		*p++ = 'P';
+	}
+	if (nm) {
+		*p++ = 0x07;
+		*p++ = nm;
+		memcpy(p, name, nm);
+		p += nm;
 	}
 	len = p - out - 2;
 	out[0] = 0x80;
@@ -252,10 +273,10 @@ static int dtmf_send(struct slic *s, uint8_t ch, const char *number)
 	return dtmf_digit(s, ch, 'C');
 }
 
-int cid_send(struct slic *s, uint8_t ch, int mode, const char *number, const struct tm *t)
+int cid_send(struct slic *s, uint8_t ch, int mode, const char *number, const char *name, const struct tm *t)
 {
 	uint8_t msg[CID_MSG_MAX];
-	char num[21], loc[40];
+	char num[21], loc[40], plain[33] = "";
 	int n = 0;
 
 	if (loc_on)
@@ -269,7 +290,8 @@ int cid_send(struct slic *s, uint8_t ch, int mode, const char *number, const str
 	switch (mode) {
 	case CID_BELLCORE:
 	case CID_ETSI:
-		if ((n = cid_mdmf(number, t, msg, sizeof(msg))) < 0)
+		cid_name_ascii(name ? name : "", plain, sizeof(plain));
+		if ((n = cid_mdmf(number, plain, t, msg, sizeof(msg))) < 0)
 			return n;
 		return fsk_send(s, ch, mode == CID_ETSI ? &v23 : &bell202, msg, n);
 	case CID_DTMF:
@@ -279,7 +301,7 @@ int cid_send(struct slic *s, uint8_t ch, int mode, const char *number, const str
 	}
 }
 
-int cid_send_before(struct slic *s, uint8_t ch, int mode, const char *number, const struct tm *t)
+int cid_send_before(struct slic *s, uint8_t ch, int mode, const char *number, const char *name, const struct tm *t)
 {
 	int e;
 
@@ -293,14 +315,14 @@ int cid_send_before(struct slic *s, uint8_t ch, int mode, const char *number, co
 			goto out;
 		s->delay(s->ctx, 60);
 	}
-	e = cid_send(s, ch, mode, number, t);
+	e = cid_send(s, ch, mode, number, name, t);
 	s->delay(s->ctx, 200);
 out:
 	si_linefeed(s, ch, SI_LF_FWD);
 	return e;
 }
 
-int cid_send_rpas(struct slic *s, uint8_t ch, int mode, const char *number, const struct tm *t)
+int cid_send_rpas(struct slic *s, uint8_t ch, int mode, const char *number, const char *name, const struct tm *t)
 {
 	int e;
 
@@ -312,7 +334,7 @@ int cid_send_rpas(struct slic *s, uint8_t ch, int mode, const char *number, cons
 	if ((e = si_linefeed(s, ch, SI_LF_FWD_OHT)))
 		goto out;
 	s->delay(s->ctx, 650);
-	e = cid_send(s, ch, mode, number, t);
+	e = cid_send(s, ch, mode, number, name, t);
 	s->delay(s->ctx, 250);
 out:
 	si_linefeed(s, ch, SI_LF_FWD);

@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 perz3us
+TITLE="Example service"
+PACKAGE=none
+URL=https://github.com/Perz3us/openwrt-aw1000-phone/blob/main/docs/sip-services.md

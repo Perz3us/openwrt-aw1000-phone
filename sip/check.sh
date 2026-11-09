@@ -31,6 +31,22 @@ done
 
 [ ! -e "$dir/setup" ] || [ -x "$dir/setup" ] || fail "setup cannot be run"
 
+for s in ports account; do
+	[ ! -e "$dir/$s" ] || [ -x "$dir/$s" ] || fail "$s cannot be run"
+done
+
+if [ -x "$dir/ports" ]; then
+	out=$("$dir/ports")
+	echo "$out" | grep -q '^sip [0-9][0-9]*$' || fail "ports printed no sip line"
+	bad=$(echo "$out" | grep -vE '^(sip [0-9]+|rtp [0-9]+-[0-9]+)$')
+	[ -z "$bad" ] || fail "ports printed '$bad', each line must be 'sip PORT' or 'rtp FROM-TO'"
+fi
+
+if [ -x "$dir/account" ]; then
+	bad=$("$dir/account" | grep -vE '^(host|port|user|password|transport)=')
+	[ -z "$bad" ] || fail "account printed '$bad', each line must be host=, port=, user=, password= or transport="
+fi
+
 if [ -x "$dir/status" ]; then
 	st=$("$dir/status")
 	case "$st" in

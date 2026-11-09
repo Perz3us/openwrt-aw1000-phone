@@ -1,0 +1,5 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 perz3us
+
+exec "$(dirname "$0")/example.rpcd" off

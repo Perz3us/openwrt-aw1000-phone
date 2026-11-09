@@ -3,7 +3,12 @@
 		"description": "Grant access to the RJ11 phone port",
 		"read": {
 			"ubus": {
-				"fxs": [ "status", "version", "calls", "history", "backup", "sip_services" ]
+				"fxs": [ "status", "version", "calls", "history", "backup", "sip_services", "forward_get", "mqtt_status", "sip_vpn_status", "rec_status", "quiet_status" ]
+			},
+			"cgi-io": [ "download" ],
+			"file": {
+				"/root/phone-recordings/*.wav": [ "read" ],
+				"/mnt/*/phone-recordings/*.wav": [ "read" ]
 			},
 			"uci": [ "fxs" ]
 		},
@@ -13,7 +18,7 @@
 				"/tmp/fxs-restore.json": [ "write" ]
 			},
 			"ubus": {
-				"fxs": [ "clear_guard", "set_enabled", "ring_test", "ring", "click_call", "restore", "set_sip", "clear_history", "delete_calls" ]
+				"fxs": [ "clear_guard", "set_enabled", "ring_test", "ring", "click_call", "restore", "set_sip", "clear_history", "delete_calls", "forward_set", "ussd", "ussd_end", "set_sip_vpn", "sip_qr", "rec_keep", "rec_delete", "quiet_set", "quiet_seen" ]
 			},
 			"uci": [ "fxs" ]
 		}

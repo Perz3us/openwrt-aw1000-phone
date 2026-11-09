@@ -1,5 +1,6 @@
 'use strict';
 'require view';
+'require fxs.tabs';
 'require form';
 
 return view.extend({

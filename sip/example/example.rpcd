@@ -1,0 +1,142 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 perz3us
+
+. /usr/share/libubox/jshn.sh
+
+DIR=/tmp/fxs-example
+STATE=$DIR/state
+LOG=$DIR/log
+PLUGIN=/usr/libexec/rpcd/fxs_sip
+
+load() {
+	state=off origin=none answered_by=none number=
+	[ -f "$STATE" ] && read -r state origin answered_by number < "$STATE"
+}
+
+reply() {
+	json_init
+	json_add_string state "$state"
+	json_add_string origin "$origin"
+	json_add_string answered_by "$answered_by"
+	json_add_string number "$number"
+	json_add_boolean enabled "$([ "$state" = off ] && echo 0 || echo 1)"
+	json_dump
+}
+
+change() {
+	state=$1 origin=$2 answered_by=$3 number=$4
+	mkdir -p "$DIR"
+	echo "$state $origin $answered_by $number" > "$STATE.new" && mv "$STATE.new" "$STATE"
+	ubus send fxs_sip.call "$(reply)"
+}
+
+note() {
+	mkdir -p "$DIR"
+	echo "$*" >> "$LOG"
+}
+
+args() {
+	local input
+
+	read -r input
+	json_load "$input"
+	json_get_var line line
+	json_get_var dialed number
+	json_get_var digit digit
+	case "$line" in
+	''|*[!a-z0-9_-]*) line=phone ;;
+	esac
+}
+
+good_number() {
+	case "$1" in
+	''|*[!0-9+*#]*) return 1 ;;
+	esac
+	[ "${#1}" -le 23 ]
+}
+
+method() {
+	load
+	case "$1" in
+	status)
+		;;
+	dial)
+		args
+		note "dial $line $dialed"
+		[ "$state" = idle ] && good_number "$dialed" && change dialing "$line" none "$dialed" >/dev/null
+		;;
+	answer)
+		args
+		note "answer $line"
+		[ "$state" = ringing ] && change active "$origin" "$line" "$number" >/dev/null
+		;;
+	reject|hangup)
+		args
+		note "$1 $line"
+		[ "$state" = off ] || change idle none none >/dev/null
+		;;
+	digit)
+		args
+		note "digit $line $digit"
+		;;
+	*)
+		return
+		;;
+	esac
+	reply
+}
+
+hand() {
+	load
+	case "$1" in
+	on)
+		[ "$state" = off ] && change idle none none
+		;;
+	off)
+		[ -f "$STATE" ] && change off none none
+		;;
+	ring)
+		good_number "$2" || { echo "usage: $0 ring NUMBER"; exit 2; }
+		change ringing network none "$2"
+		;;
+	alert)
+		change alerting "$origin" "$answered_by" "$number"
+		;;
+	connect)
+		change active "$origin" "$answered_by" "$number"
+		;;
+	take)
+		[ "$origin" = none ] && origin=network
+		change active "$origin" example "${2:-$number}"
+		;;
+	end)
+		change idle none none
+		;;
+	install)
+		ln -sf "$(cd "$(dirname "$0")" && pwd)/example.rpcd" "$PLUGIN"
+		/etc/init.d/rpcd reload
+		;;
+	remove)
+		rm -f "$PLUGIN"
+		/etc/init.d/rpcd reload
+		;;
+	*)
+		echo "usage: $0 install|remove|on|off|ring NUMBER|alert|connect|take [NUMBER]|end"
+		exit 2
+		;;
+	esac
+	return 0
+}
+
+case "$1" in
+list)
+	echo '{ "status": {}, "dial": { "line": "", "number": "" }, "answer": { "line": "" }, "reject": { "line": "" }, "hangup": { "line": "" }, "digit": { "line": "", "digit": "" } }'
+	;;
+call)
+	method "$2"
+	;;
+*)
+	hand "$@"
+	;;
+esac

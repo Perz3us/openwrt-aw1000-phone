@@ -143,3 +143,35 @@ const struct si_tone aw1000_waitingtone = {
 	},
 	.omode = 0x66,
 };
+
+const struct si_tone aw1000_noservicetone = {
+	.osc = {
+		{ .freq = 0x05E00000, .amp = 0x000E2000, .talo = 0x50, .tahi = 0x0A, .tilo = 0x50, .tihi = 0x0A },
+		{ .freq = 0x05E00000, .amp = 0x000E2000, .talo = 0x50, .tahi = 0x0A, .tilo = 0x50, .tihi = 0x0A },
+	},
+	.omode = 0x66,
+};
+
+const struct si_tone aw1000_confirmtone = {
+	.osc = {
+		{ .freq = 0x078F0000, .amp = 0x000E2000, .talo = 0x20, .tahi = 0x03, .tilo = 0x20, .tihi = 0x03 },
+		{ .freq = 0x078F0000, .amp = 0x000E2000, .talo = 0x20, .tahi = 0x03, .tilo = 0x20, .tihi = 0x03 },
+	},
+	.omode = 0x66,
+};
+
+const struct si_tone aw1000_stuttertone = {
+	.osc = {
+		{ .freq = 0x078F0000, .amp = 0x000E2000, .talo = 0x20, .tahi = 0x03, .tilo = 0x20, .tihi = 0x03 },
+		{ .freq = 0x078F0000, .amp = 0x000E2000, .talo = 0x20, .tahi = 0x03, .tilo = 0x20, .tihi = 0x03 },
+	},
+	.omode = 0x66,
+};
+
+const struct si_tone aw1000_congestiontone = {
+	.osc = {
+		{ .freq = 0x078F0000, .amp = 0x000E2000, .talo = 0xD0, .tahi = 0x07, .tilo = 0xD0, .tihi = 0x07 },
+		{ .freq = 0x078F0000, .amp = 0x000E2000, .talo = 0xD0, .tahi = 0x07, .tilo = 0xD0, .tihi = 0x07 },
+	},
+	.omode = 0x66,
+};

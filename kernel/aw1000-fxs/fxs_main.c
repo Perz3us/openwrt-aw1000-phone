@@ -178,6 +178,15 @@ static long fxs_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 			ret = -EFAULT;
 		break;
 	}
+	case FXS_REC:
+		if (get_user(v, (u32 __user *)p)) {
+			ret = -EFAULT;
+			break;
+		}
+		fxs_rec_set(&fxs, v == 1);
+		if (put_user(READ_ONCE(fxs.rec_drop), (u32 __user *)p))
+			ret = -EFAULT;
+		break;
 	case FXS_AUDIO_STAT: {
 		struct fxs_austat st = {
 			.under = READ_ONCE(fxs.au_under),
@@ -329,6 +338,76 @@ static struct miscdevice au_misc = {
 	.fops = &au_fops,
 };
 
+static int rec_open(struct inode *i, struct file *f)
+{
+	u32 *buf = kmalloc_array(AU_CHUNK, sizeof(u32), GFP_KERNEL);
+
+	if (!buf)
+		return -ENOMEM;
+	mutex_lock(&fxs.lock);
+	if (fxs.rec_open) {
+		mutex_unlock(&fxs.lock);
+		kfree(buf);
+		return -EBUSY;
+	}
+	fxs.rec_open = true;
+	mutex_unlock(&fxs.lock);
+	f->private_data = buf;
+	return 0;
+}
+
+static int rec_release(struct inode *i, struct file *f)
+{
+	kfree(f->private_data);
+	mutex_lock(&fxs.lock);
+	fxs.rec_open = false;
+	mutex_unlock(&fxs.lock);
+	return 0;
+}
+
+static ssize_t rec_read(struct file *f, char __user *ubuf, size_t len, loff_t *off)
+{
+	u32 *buf = f->private_data;
+	u32 n;
+	int ret;
+
+	if (len < sizeof(u32))
+		return -EINVAL;
+	if (!(f->f_flags & O_NONBLOCK)) {
+		ret = wait_event_interruptible_timeout(fxs.recq, !READ_ONCE(fxs.rec_on) ||
+			!fxs.br_task || fxs_rec_avail(&fxs) >= 160, HZ / 2);
+		if (ret < 0)
+			return ret;
+	}
+	n = fxs_rec_read(&fxs, buf, min_t(size_t, len / sizeof(u32), AU_CHUNK));
+	if (!n)
+		return READ_ONCE(fxs.rec_on) ? -EAGAIN : 0;
+	if (copy_to_user(ubuf, buf, n * sizeof(u32)))
+		return -EFAULT;
+	return n * sizeof(u32);
+}
+
+static __poll_t rec_poll(struct file *f, poll_table *w)
+{
+	poll_wait(f, &fxs.recq, w);
+	return fxs_rec_avail(&fxs) >= 160 ? EPOLLIN | EPOLLRDNORM : 0;
+}
+
+static const struct file_operations rec_fops = {
+	.owner = THIS_MODULE,
+	.open = rec_open,
+	.release = rec_release,
+	.read = rec_read,
+	.poll = rec_poll,
+	.llseek = noop_llseek,
+};
+
+static struct miscdevice rec_misc = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "fxs0rec",
+	.fops = &rec_fops,
+};
+
 static void fxs_unmap(void)
 {
 	if (fxs.tlmm)
@@ -356,11 +435,14 @@ static int __init fxs_init(void)
 	init_waitqueue_head(&fxs.evq);
 	init_waitqueue_head(&fxs.auq);
 	spin_lock_init(&fxs.au_lock);
+	init_waitqueue_head(&fxs.recq);
+	spin_lock_init(&fxs.rec_lock);
 	timer_setup(&fxs.ring_wd, ring_wd_fire, 0);
 
 	fxs.au_rx = kcalloc(FXS_AU_RING, sizeof(u32), GFP_KERNEL);
 	fxs.au_tx = kcalloc(FXS_AU_RING, sizeof(u32), GFP_KERNEL);
-	if (!fxs.au_rx || !fxs.au_tx) {
+	fxs.rec = kcalloc(FXS_REC_RING, sizeof(u32), GFP_KERNEL);
+	if (!fxs.au_rx || !fxs.au_tx || !fxs.rec) {
 		ret = -ENOMEM;
 		goto err_map;
 	}
@@ -390,8 +472,13 @@ static int __init fxs_init(void)
 	ret = misc_register(&au_misc);
 	if (ret)
 		goto err_misc;
+	ret = misc_register(&rec_misc);
+	if (ret)
+		goto err_au;
 	return 0;
 
+err_au:
+	misc_deregister(&au_misc);
 err_misc:
 	misc_deregister(&fxs_misc);
 err_spi:
@@ -402,11 +489,13 @@ err_map:
 	fxs_unmap();
 	kfree(fxs.au_rx);
 	kfree(fxs.au_tx);
+	kfree(fxs.rec);
 	return ret;
 }
 
 static void __exit fxs_exit(void)
 {
+	misc_deregister(&rec_misc);
 	misc_deregister(&au_misc);
 	misc_deregister(&fxs_misc);
 	timer_delete_sync(&fxs.ring_wd);
@@ -416,6 +505,7 @@ static void __exit fxs_exit(void)
 	fxs_unmap();
 	kfree(fxs.au_rx);
 	kfree(fxs.au_tx);
+	kfree(fxs.rec);
 }
 
 module_init(fxs_init);

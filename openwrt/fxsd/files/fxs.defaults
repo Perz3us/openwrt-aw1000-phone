@@ -15,4 +15,24 @@ if [ -z "$(uci -q get fxs.main.sip_service)" ]; then
 	uci -q set fxs.main.sip_service='qmodem'
 	uci -q commit fxs
 fi
+if [ -n "$(uci -q get fxs.main.dnd)" ]; then
+	if [ "$(uci -q get fxs.main.dnd)" = 1 ]; then
+		from=$(uci -q get fxs.main.dnd_from || echo 22:00)
+		to=$(uci -q get fxs.main.dnd_to || echo 07:00)
+		[ "$(uci -q get fxs.main.dnd_allday)" = 1 ] && from=00:00 && to=00:00
+		mode=repeat
+		[ "$(uci -q get fxs.main.dnd_repeat)" = 0 ] && mode=allowed
+		uci -q set fxs.quiet_old=quiet
+		uci -q set fxs.quiet_old.enabled=1
+		uci -q set fxs.quiet_old.days='mon tue wed thu fri sat sun'
+		uci -q set fxs.quiet_old.from="$from"
+		uci -q set fxs.quiet_old.to="$to"
+		uci -q set fxs.quiet_old.mode="$mode"
+	fi
+	uci -q delete fxs.main.dnd
+	uci -q delete fxs.main.dnd_from
+	uci -q delete fxs.main.dnd_to
+	uci -q delete fxs.main.dnd_allday
+	uci -q commit fxs
+fi
 exit 0

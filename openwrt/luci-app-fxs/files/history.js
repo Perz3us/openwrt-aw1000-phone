@@ -1,15 +1,20 @@
 'use strict';
 'require view';
+'require fxs.tabs';
 'require rpc';
 'require uci';
 'require ui';
 'require dom';
+'require fs';
 
 var callStatus = rpc.declare({ object: 'fxs', method: 'status' });
 var callHistory = rpc.declare({ object: 'fxs', method: 'history', expect: { log: '' } });
 var callClear = rpc.declare({ object: 'fxs', method: 'clear_history' });
 var callDelete = rpc.declare({ object: 'fxs', method: 'delete_calls', params: [ 'lines' ] });
 var callClick = rpc.declare({ object: 'fxs', method: 'click_call', params: [ 'number' ] });
+var callRec = rpc.declare({ object: 'fxs', method: 'rec_status' });
+var callRecKeep = rpc.declare({ object: 'fxs', method: 'rec_keep', params: [ 'name', 'keep' ] });
+var callRecDelete = rpc.declare({ object: 'fxs', method: 'rec_delete', params: [ 'name' ] });
 
 var PAGE = 50;
 
@@ -18,6 +23,7 @@ var statusText = {
 	missed: _('Missed'),
 	elsewhere: _('Answered on SIP'),
 	blocked: _('Blocked'),
+	barred: _('Not allowed'),
 	failed: _('Failed'),
 	cancelled: _('Not answered'),
 	active: _('In progress')
@@ -33,14 +39,36 @@ var css = '\
 .fxs-pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 8px; }\
 .fxs-in { color: #2e8b3e; }\
 .fxs-out { color: #3a7bd5; }\
-.fxs-bad { color: #c0392b; }';
+.fxs-bad { color: #c0392b; }\
+.fxs-rec { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }\
+.fxs-rec audio { max-width: 100%; height: 32px; }';
 
 function digits(n) {
 	return (n || '').replace(/[^0-9]/g, '').slice(-9);
 }
 
+function reasonText(r, repeatMin) {
+	var p = (r || '').split(' '), how = p.shift(), why = p.join(' '), name = why.replace(/^(quiet|holiday):/, '');
+
+	if (how == 'rang')
+		return why == 'important' ? _('Rang, Important contact') :
+			why == 'allowed' ? _('Rang, on the Always ring list') :
+			why == 'repeat' ? _('Rang, called again within %d minutes').format(repeatMin) : '';
+	if (why == 'never')
+		return _('Not rung, contact set to Never ring');
+	if (why == 'quick')
+		return how == 'busy' ? _('Turned away, quiet was on') : _('Silenced, quiet was on');
+	if (!name)
+		name = /^holiday:/.test(why) ? _('a holiday') : _('a window');
+	if (how == 'busy')
+		return _('Turned away by %s').format(name);
+	if (how == 'once')
+		return _('One ring only, %s').format(name);
+	return _('Silenced by %s').format(name);
+}
+
 function parse(text, live) {
-	var calls = [], open = {};
+	var calls = [], open = {}, reason = null;
 
 	function close(c, t, status) {
 		c.end = t;
@@ -84,8 +112,15 @@ function parse(text, live) {
 		case 'waiting':
 			target = start(t, num, 'in');
 			break;
+		case 'reason':
+			reason = { text: num, line: line };
+			return;
 		case 'blocked':
 			target = { start: t, number: num, dir: 'in', connected: null, end: t, status: 'blocked', lines: [] };
+			calls.push(target);
+			break;
+		case 'barred':
+			target = { start: t, number: num, dir: 'out', connected: null, end: t, status: 'barred', lines: [] };
 			calls.push(target);
 			break;
 		case 'connected':
@@ -112,8 +147,19 @@ function parse(text, live) {
 				close(c, t);
 			closeAll(t);
 			break;
+		case 'recorded':
+			target = calls.length ? calls[calls.length - 1] : null;
+			if (target)
+				target.rec = num;
+			break;
 		}
 
+		if (target && reason && (ev == 'incoming' || ev == 'waiting')) {
+			target.reason = reason.text;
+			target.lines.push(reason.line);
+		}
+		if (ev == 'incoming' || ev == 'waiting')
+			reason = null;
 		if (target)
 			target.lines.push(line);
 	});
@@ -161,14 +207,95 @@ return view.extend({
 		return Promise.all([
 			callHistory(),
 			callStatus().catch(function() { return {}; }),
-			uci.load('fxs')
+			uci.load('fxs'),
+			L.resolveDefault(callRec(), {})
+		]);
+	},
+
+	recFiles: function(st) {
+		var map = {};
+
+		(st.files || []).forEach(function(f) { map[f.name] = f; });
+		return map;
+	},
+
+	recBlob: function(f) {
+		return fs.read_direct(f.path, 'blob');
+	},
+
+	playRec: function(f, box) {
+		return this.recBlob(f).then(function(blob) {
+			var a = E('audio', { 'controls': '', 'autoplay': '', 'src': URL.createObjectURL(blob) });
+
+			dom.content(box, a);
+		}).catch(function(e) {
+			dom.content(box, E('em', _('Could not load the recording: %s').format(e.message)));
+		});
+	},
+
+	saveRec: function(f) {
+		return this.recBlob(f).then(function(blob) {
+			var a = E('a', { 'href': URL.createObjectURL(blob), 'download': f.name, 'style': 'display:none' });
+
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+		});
+	},
+
+	keepRec: function(f) {
+		return callRecKeep(f.name, !f.keep).then(L.bind(function(r) {
+			if (r && r.result)
+				f.keep = !f.keep;
+			this.refresh();
+		}, this));
+	},
+
+	deleteRec: function(f) {
+		ui.showModal(_('Delete recording'), [
+			E('p', _('Delete this recording? The call stays in the history.')),
+			E('div', { 'class': 'right' }, [
+				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
+				' ',
+				E('button', { 'class': 'btn cbi-button-negative', 'click': L.bind(function() {
+					return callRecDelete(f.name).then(L.bind(function(r) {
+						ui.hideModal();
+						if (r && r.result)
+							delete this.recMap[f.name];
+						else
+							ui.addNotification(null, E('p', r && r.error == 'busy' ? _('This call is still being recorded.') : _('Could not delete the recording.')));
+						this.refresh();
+					}, this));
+				}, this) }, _('Delete'))
+			])
+		]);
+	},
+
+	recCell: function(c) {
+		var f = c.rec && this.recMap[c.rec], box;
+
+		if (!c.rec)
+			return '';
+		if (!f)
+			return E('div', { 'class': 'fxs-rec' }, E('em', _('Recording not found. It may be on a USB stick that is not plugged in, or it was removed.')));
+		box = E('span');
+		return E('div', { 'class': 'fxs-rec' }, [
+			box,
+			E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, 'playRec', f, box) }, _('Play')),
+			E('button', { 'class': 'btn', 'click': ui.createHandlerFn(this, 'saveRec', f) }, _('Download')),
+			E('button', {
+				'class': 'btn',
+				'title': _('Kept recordings are never removed to make room'),
+				'click': ui.createHandlerFn(this, 'keepRec', f)
+			}, f.keep ? _('Kept') : _('Keep')),
+			E('button', { 'class': 'btn cbi-button-remove', 'click': L.bind(this.deleteRec, this, f) }, _('Delete recording'))
 		]);
 	},
 
 	names: function() {
 		var map = {};
 
-		[ 'speed', 'block' ].forEach(function(type) {
+		[ 'speed', 'block', 'contact' ].forEach(function(type) {
 			uci.sections('fxs', type).forEach(function(s) {
 				if (s.name && s.number)
 					map[digits(s.number)] = s.name;
@@ -245,7 +372,11 @@ return view.extend({
 				E('td', { 'class': 'td' }, E('span', { 'class': c.dir == 'in' ? 'fxs-in' : 'fxs-out' },
 					c.dir == 'in' ? '↙ ' + _('Incoming') : '↗ ' + _('Outgoing'))),
 				E('td', { 'class': 'td' }, duration(c)),
-				E('td', { 'class': 'td' }, E('span', { 'class': bad ? 'fxs-bad' : '' }, statusText[c.status] || c.status)),
+				E('td', { 'class': 'td' }, [
+					E('span', { 'class': bad ? 'fxs-bad' : '' }, statusText[c.status] || c.status),
+					c.reason && reasonText(c.reason, +(uci.get('fxs', 'main', 'dnd_repeat') || 3)) ?
+						E('div', { 'style': 'opacity: .75; font-size: .9em' }, reasonText(c.reason, +(uci.get('fxs', 'main', 'dnd_repeat') || 3))) : ''
+				]),
 				E('td', { 'class': 'td right' }, c.status == 'active' ? '' : [
 					/^\+?[0-9*#]{1,23}$/.test(c.number) ? E('button', {
 						'class': 'btn cbi-button-action',
@@ -257,7 +388,8 @@ return view.extend({
 						'class': 'btn cbi-button-remove',
 						'title': _('Delete this call'),
 						'click': L.bind(this.deleteCall, this, c)
-					}, _('Delete'))
+					}, _('Delete')),
+					this.recCell(c)
 				])
 			]);
 		}, this);
@@ -356,6 +488,7 @@ return view.extend({
 
 		this.calls = parse(data[0], live);
 		this.nameMap = this.names();
+		this.recMap = this.recFiles(data[3] || {});
 		this.page = 0;
 
 		this.from = E('input', { 'type': 'date', 'class': 'cbi-input-text', 'change': update });

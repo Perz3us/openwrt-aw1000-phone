@@ -12,6 +12,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include "pcmsock.h"
+#include "recorder.h"
 
 static int afd = -1, lfd = -1, cfd = -1, wb, native, frame_n, quit, live, running;
 static uint32_t stats[4];
@@ -88,6 +89,7 @@ static void from_modem(int16_t *frame, int *nf, struct pcm_down *down)
 	for (i = 0; i < n; i++)
 		s[i] = (int16_t)(pairs[i] & 0xffff);
 	k = pcm_from_modem(down, wb, native, s, n, d);
+	recorder_push(REC_SIDE_CALLER, d, k);
 	for (i = 0; i < k; i++) {
 		frame[(*nf)++] = d[i];
 		if (*nf < frame_n)
@@ -119,6 +121,7 @@ static void to_modem(int on, struct pcm_up *up)
 		return;
 	}
 	stats[1]++;
+	recorder_push(REC_SIDE_HOUSE, in, n);
 	n = pcm_to_modem(up, wb, native, in, n, s);
 	for (i = 0; i < n; i++)
 		pairs[i] = (uint16_t)s[i];

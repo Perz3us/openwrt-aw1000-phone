@@ -5,7 +5,7 @@
 
 #include "clcc.h"
 
-enum line_tone { TONE_OFF, TONE_DIAL, TONE_BUSY, TONE_RINGBACK, TONE_WAITING };
+enum line_tone { TONE_OFF, TONE_DIAL, TONE_BUSY, TONE_RINGBACK, TONE_WAITING, TONE_NOSERVICE, TONE_CONGESTION, TONE_CONFIRM, TONE_STUTTER };
 
 enum line_state {
 	LS_IDLE,
@@ -29,11 +29,17 @@ struct line_ops {
 	void (*log)(void *ctx, const char *what, const char *number);
 	const char *(*speed)(void *ctx, const char *code);
 	int (*blocked)(void *ctx, const char *number);
+	int (*barred)(void *ctx, const char *number);
+	int (*service)(void *ctx, const char *code);
+	void (*dnd_code)(void *ctx, int on);
+	void (*quiet_for)(void *ctx, int minutes);
 	int (*elsewhere)(void *ctx);
+	int (*call_fail)(void *ctx);
 	void *ctx;
 };
 
 #define LINE_DIGITS_MAX 24
+#define LINE_CODE_MAX 8
 
 struct line {
 	enum line_state state;
@@ -46,10 +52,15 @@ struct line {
 	int onhook_pending;
 	int seen_call;
 	int ringback, ringback_on;
+	int no_service;
+	int missed_tone, missed_flag, stutter;
 	int recall, waiting_on, ncalls, active_id, held, blocked_id, released;
-	int hide, clir;
 	char last_out[CLCC_NUM_MAX];
 	char last_in[CLCC_NUM_MAX];
+	char code_redial[LINE_CODE_MAX];
+	char code_callback[LINE_CODE_MAX];
+	char code_dnd_on[LINE_CODE_MAX];
+	char code_dnd_off[LINE_CODE_MAX];
 	char hotline[LINE_DIGITS_MAX];
 	char autodial[LINE_DIGITS_MAX];
 	unsigned long t_state, t_digit, t_onhook, t_hangup, t_gone, t_block;
@@ -59,6 +70,8 @@ struct line {
 int line_emergency(const char *number);
 void line_autodial(struct line *l, const char *number, unsigned long now);
 void line_init(struct line *l, const struct line_ops *ops);
+int line_set_codes(struct line *l, const char *redial, const char *callback);
+int line_set_dnd_codes(struct line *l, const char *on, const char *off);
 void line_hook(struct line *l, int offhook, unsigned long now);
 void line_digit(struct line *l, char d, unsigned long now);
 void line_modem(struct line *l, const struct clcc_call *calls, int n, unsigned long now);

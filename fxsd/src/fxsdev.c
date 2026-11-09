@@ -154,6 +154,17 @@ int fxsdev_bridge(struct slic *s, uint32_t arg)
 	return io(FXS_PCM_BRIDGE, &v);
 }
 
+int fxsdev_rec(struct slic *s, int on, uint32_t *dropped)
+{
+	__u32 v = on ? 1 : 0;
+	int e = io(FXS_REC, &v);
+
+	(void)s;
+	if (!e && dropped)
+		*dropped = v;
+	return e;
+}
+
 int fxsdev_stat(struct slic *s, uint32_t st[6])
 {
 	struct fxs_pcmstat p;

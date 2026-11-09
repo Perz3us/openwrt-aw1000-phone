@@ -8,6 +8,9 @@ STATE=/var/run/fxsd.state
 CALLS=/etc/fxs/calls.log
 GUARD=/etc/fxs/.starting
 CMD=/var/run/fxsd.cmd
+REPLY=/var/run/fxsd.reply
+SIP_VPN=/usr/libexec/fxs-sip-vpn
+SIP_QR=/usr/libexec/fxs-sip-qr
 UPLOAD=/tmp/fxs-restore.json
 RESTORE_DIR=/tmp/fxs-restore
 SIP_ROOT=/usr/share/fxs/sip
@@ -25,7 +28,7 @@ sip_title() {
 }
 
 status() {
-	local state=stopped peer= offhook=0 vbat= vline= iloop= own= testring=0 voiceoff=0 since=0 hd=0 sip=0 sipcall=0 dnd=0 silent=0 phone=-1 k v patch
+	local state=stopped peer= offhook=0 vbat= vline= iloop= own= testring=0 voiceoff=0 since=0 hd=0 sip=0 sipcall=0 dnd=0 silent=0 phone=-1 service=-1 k v patch
 
 	if [ -f "$STATE" ]; then
 		while IFS='=' read -r k v; do
@@ -46,6 +49,7 @@ status() {
 			dnd) dnd="$v" ;;
 			silent) silent="$v" ;;
 			phone) phone="$v" ;;
+			service) service="$v" ;;
 			esac
 		done < "$STATE"
 	fi
@@ -64,6 +68,7 @@ status() {
 	json_add_boolean dnd "$dnd"
 	json_add_boolean silent "$silent"
 	json_add_int phone "$phone"
+	json_add_int service "$service"
 	[ "$state" = talking ] && [ "${since:-0}" -gt 0 ] && json_add_int duration $(($(date +%s) - since))
 	[ -n "$vbat" ] && json_add_int vbat "$vbat"
 	[ -n "$vline" ] && json_add_int vline "$vline"
@@ -73,8 +78,13 @@ status() {
 	json_add_boolean guard "$([ -f "$GUARD" ] && echo 1 || echo 0)"
 	json_add_boolean patch "$([ -s "${patch:-/etc/fxs/si3226x_patch.bin}" ] && echo 1 || echo 0)"
 	json_add_boolean enabled "$(uci -q get fxs.main.enabled || echo 1)"
+	json_add_boolean clock_ok "$([ "$(date +%Y)" -ge 2025 ] && echo 1 || echo 0)"
 	json_add_boolean sipon "$(sip_is_on)"
 	json_add_string siptitle "$(sip_title "$(sip_current)")"
+	json_add_string recmode "$(uci -q get fxs.main.rec_mode || echo off)"
+	json_add_boolean recactive "$(grep -qx active=1 /var/run/fxsd.rec.state 2>/dev/null && echo 1 || echo 0)"
+	json_add_boolean recfull "$(grep -qx full=1 /var/run/fxsd.rec.state 2>/dev/null && echo 1 || echo 0)"
+	json_add_boolean recusb "$(grep -qx usb=1 /var/run/fxsd.rec.state 2>/dev/null && echo 1 || echo 0)"
 	json_dump
 }
 
@@ -171,6 +181,45 @@ result() {
 
 send_cmd() {
 	printf '%s\n' "$1" > "$CMD.tmp" && mv "$CMD.tmp" "$CMD" && kill -USR2 $(pidof fxsd) 2>/dev/null
+}
+
+modem_request() {
+	local reply="$REPLY.$$" i=0 line ok= err= text= more=0
+
+	case "$1" in
+	fwd-get|fwd-set|ussd|ussd-end) ;;
+	*) modem_result 0 kind; return ;;
+	esac
+	case "$2" in
+	*[!0-9*#+,]*) modem_result 0 arg; return ;;
+	esac
+	rm -f "$reply" "$reply.tmp"
+	send_cmd "at-req $$ $1 $2" || { rm -f "$CMD" "$CMD.tmp"; modem_result 0 stopped; return; }
+	while [ ! -f "$reply" ] && [ "$i" -lt "${MODEM_WAIT:-15}" ]; do
+		sleep 1
+		i=$((i + 1))
+	done
+	[ -f "$reply" ] || { modem_result 0 timeout; return; }
+	while IFS= read -r line; do
+		case "$line" in
+		ok=*) ok="${line#ok=}" ;;
+		error=*) err="${line#error=}" ;;
+		more=*) more="${line#more=}" ;;
+		text=*) text="${line#text=}" ;;
+		esac
+	done < "$reply"
+	rm -f "$reply"
+	[ -n "$ok" ] || { modem_result 0 reply; return; }
+	modem_result "$ok" "$err" "$text" "$more"
+}
+
+modem_result() {
+	json_init
+	json_add_boolean ok "$1"
+	[ -n "$2" ] && json_add_string error "$2"
+	[ -n "$3" ] && json_add_string text "$3"
+	[ "$4" = 1 ] && json_add_boolean more 1
+	json_dump
 }
 
 click_call() {
@@ -307,9 +356,303 @@ set_sip() {
 	result 1
 }
 
+QUIET_SEEN=/etc/fxs/quiet.seen
+
+quiet_set() {
+	local input minutes
+
+	read -r input
+	json_load "$input"
+	json_get_var minutes minutes
+	case "$minutes" in
+	-1|0|[1-9]|[1-9][0-9]|[1-9][0-9][0-9]|1[0-4][0-9][0-9]) ;;
+	*) result 0 minutes; return ;;
+	esac
+	[ "$minutes" -le 1440 ] || { result 0 minutes; return; }
+	send_cmd "quiet $minutes" && result 1 || result 0 stopped
+}
+
+quiet_status() {
+	local on until seen n
+
+	on=$(sed -n 's/^quiet=//p' "$STATE" 2>/dev/null)
+	until=$(sed -n 's/^quiet_until=//p' "$STATE" 2>/dev/null)
+	seen=$(cat "$QUIET_SEEN" 2>/dev/null)
+	n=$(awk -v s="${seen:-0}" '$2 == "reason" && $1 > s && $3 != "rang" && $4 ~ /^(quiet:|holiday:|quick)/ { n++ } END { print n + 0 }' "$CALLS" 2>/dev/null)
+	json_init
+	json_add_boolean on "${on:-0}"
+	json_add_int until "${until:-0}"
+	json_add_int now "$(date +%s)"
+	json_add_boolean scheduled "$(grep -qx dnd=1 "$STATE" 2>/dev/null && echo 1 || echo 0)"
+	json_add_int quiet_calls "${n:-0}"
+	json_dump
+}
+
+quiet_seen() {
+	mkdir -p /etc/fxs
+	date +%s > "$QUIET_SEEN"
+	result 1
+}
+
+REC_FLASH=/root/phone-recordings
+REC_STATE=/var/run/fxsd.rec.state
+
+usb_mount() {
+	awk '$1 ~ /^\/dev\/sd/ && $2 ~ /^\/mnt\// { print $2; exit }' /proc/mounts 2>/dev/null
+}
+
+rec_dirs() {
+	echo "$REC_FLASH"
+	awk '$1 ~ /^\/dev\/sd/ && $2 ~ /^\/mnt\// { print $2 "/phone-recordings" }' /proc/mounts 2>/dev/null
+}
+
+free_mb() {
+	df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print int($4 / 1024) }'
+}
+
+rec_status() {
+	local k v d f m
+
+	json_init
+	if [ -f "$REC_STATE" ]; then
+		while IFS== read -r k v; do
+			case "$k" in
+			dir|last) json_add_string "$k" "$v" ;;
+			usb|used|limit|full|pruned|active) json_add_int "$k" "${v:-0}" ;;
+			esac
+		done < "$REC_STATE"
+	fi
+	mkdir -p "$REC_FLASH"
+	json_add_int flash_free_mb "$(free_mb "$REC_FLASH")"
+	m=$(usb_mount)
+	json_add_boolean usb_present "$([ -n "$m" ] && echo 1 || echo 0)"
+	[ -n "$m" ] && json_add_int usb_free_mb "$(free_mb "$m")"
+	json_add_array files
+	for d in $(rec_dirs); do
+		for f in "$d"/*.wav; do
+			[ -f "$f" ] || continue
+			json_add_object
+			json_add_string name "${f##*/}"
+			json_add_string path "$f"
+			json_add_int size "$(wc -c < "$f")"
+			json_add_boolean keep "$([ -f "$f.keep" ] && echo 1 || echo 0)"
+			json_add_boolean usb "$([ "$d" = "$REC_FLASH" ] && echo 0 || echo 1)"
+			json_close_object
+		done
+	done
+	json_close_array
+	json_dump
+}
+
+rec_find() {
+	local d
+
+	echo "$1" | grep -qxE '[0-9]{8}-[0-9]{6}-[0-9]+\.wav' || return 1
+	for d in $(rec_dirs); do
+		[ -f "$d/$1" ] && { echo "$d/$1"; return 0; }
+	done
+	return 1
+}
+
+rec_busy() {
+	grep -qx "last=$1" "$REC_STATE" 2>/dev/null && grep -qx active=1 "$REC_STATE"
+}
+
+rec_keep() {
+	local input name keep f
+
+	read -r input
+	json_load "$input"
+	json_get_var name name
+	json_get_var keep keep
+	f=$(rec_find "$name") || { result 0 name; return; }
+	case "$keep" in
+	1|true) : > "$f.keep" ;;
+	*) rm -f "$f.keep" ;;
+	esac
+	result 1
+}
+
+rec_delete() {
+	local input name f
+
+	read -r input
+	json_load "$input"
+	json_get_var name name
+	f=$(rec_find "$name") || { result 0 name; return; }
+	rec_busy "$name" && { result 0 busy; return; }
+	rm -f "$f" "$f.keep"
+	result 1
+}
+
+vpn_devices() {
+	{
+		ls /sys/class/net 2>/dev/null | grep -E '^(wg|tailscale|tun|zt)'
+		uci -q show network | sed -n "s/^network\.\([^.=]*\)\.proto='wireguard'$/\1/p"
+	} | sort -u
+}
+
+sip_vpn_status() {
+	local l d tmp=/tmp/fxs-vpn.$$
+
+	"$SIP_VPN" status > "$tmp" 2>/dev/null
+	json_init
+	json_add_boolean enabled "$([ "$(uci -q get fxs.main.sip_vpn)" = 1 ] && echo 1 || echo 0)"
+	json_add_string interface "$(uci -q get fxs.main.sip_vpn_if)"
+	json_add_boolean active "$(grep -qx active=1 "$tmp" && echo 1 || echo 0)"
+	json_add_boolean down "$(grep -qx down=1 "$tmp" && echo 1 || echo 0)"
+	json_add_string lan "$(uci -q get network.lan.ipaddr | awk '{ print $1 }' | cut -d/ -f1)"
+	json_add_array needs
+	while IFS= read -r l; do
+		case "$l" in
+		need=*) json_add_string "" "${l#need=}" ;;
+		esac
+	done < "$tmp"
+	json_close_array
+	json_add_array vpns
+	for d in $(vpn_devices); do
+		json_add_string "" "$d"
+	done
+	json_close_array
+	rm -f "$tmp"
+	json_dump
+}
+
+set_sip_vpn() {
+	local input enabled dev
+
+	read -r input
+	json_load "$input"
+	json_get_var enabled enabled
+	json_get_var dev interface
+	case "$enabled" in
+	1|true) enabled=1 ;;
+	*) enabled=0 ;;
+	esac
+	case "$dev" in
+	*[!A-Za-z0-9_.-]*) result 0 interface; return ;;
+	esac
+	if [ "${#dev}" -gt 15 ] || { [ "$enabled" = 1 ] && [ -z "$dev" ]; }; then
+		result 0 interface
+		return
+	fi
+	uci set fxs.main.sip_vpn="$enabled"
+	if [ -n "$dev" ]; then
+		uci set fxs.main.sip_vpn_if="$dev"
+	else
+		uci -q delete fxs.main.sip_vpn_if
+	fi
+	uci commit fxs
+	[ -x "$SIP_VPN" ] && "$SIP_VPN" apply >/dev/null 2>&1
+	result 1
+}
+
+sip_qr() {
+	local l tmp=/tmp/fxs-qr.$$
+
+	"$SIP_QR" make > "$tmp" 2>/dev/null
+	json_init
+	json_add_array needs
+	while IFS= read -r l; do
+		case "$l" in
+		need=*) json_add_string "" "${l#need=}" ;;
+		esac
+	done < "$tmp"
+	json_close_array
+	while IFS= read -r l; do
+		case "$l" in
+		url=*) json_add_string url "${l#url=}" ;;
+		expires=*) json_add_int expires "${l#expires=}" ;;
+		server=*) json_add_string server "${l#server=}" ;;
+		user=*) json_add_string user "${l#user=}" ;;
+		note=*) json_add_string note "${l#note=}" ;;
+		esac
+	done < "$tmp"
+	rm -f "$tmp"
+	json_dump
+}
+
+reason_code() {
+	case "$1" in
+	always) echo 0 ;;
+	busy) echo 1 ;;
+	noanswer) echo 2 ;;
+	unreachable) echo 3 ;;
+	*) return 1 ;;
+	esac
+}
+
+mqtt_status() {
+	json_init
+	json_add_boolean client "$(command -v mosquitto_pub >/dev/null 2>&1 && echo 1 || echo 0)"
+	[ -f /var/run/fxs-mqtt.err ] && json_add_string last_error "$(head -c 200 /var/run/fxs-mqtt.err)"
+	json_dump
+}
+
+forward_get() {
+	local input reason code
+
+	read -r input
+	json_load "$input"
+	json_get_var reason reason
+	code=$(reason_code "$reason") || { modem_result 0 reason; return; }
+	modem_request fwd-get "$code"
+}
+
+forward_set() {
+	local input reason code number seconds
+
+	read -r input
+	json_load "$input"
+	json_get_var reason reason
+	json_get_var number number
+	json_get_var seconds seconds
+	code=$(reason_code "$reason") || { modem_result 0 reason; return; }
+	case "$number" in
+	''|+[0-9][0-9][0-9]*|[0-9][0-9][0-9]*) ;;
+	*) modem_result 0 number; return ;;
+	esac
+	case "${number#+}" in
+	*[!0-9]*) modem_result 0 number; return ;;
+	esac
+	[ "${#number}" -le 21 ] || { modem_result 0 number; return; }
+	case "$seconds" in
+	'') ;;
+	*[!0-9]*) modem_result 0 seconds; return ;;
+	*) [ "$seconds" -ge 5 ] && [ "$seconds" -le 30 ] || { modem_result 0 seconds; return; } ;;
+	esac
+	modem_request fwd-set "$code,$number,$seconds"
+}
+
+ussd() {
+	local input code reply
+
+	read -r input
+	json_load "$input"
+	json_get_var code code
+	json_get_var reply reply
+	if [ -n "$reply" ]; then
+		case "$reply" in
+		*[!0-9]*) modem_result 0 code; return ;;
+		esac
+		[ "${#reply}" -le 16 ] || { modem_result 0 code; return; }
+		modem_request ussd "$reply"
+		return
+	fi
+	case "$code" in
+	[*#]*[0-9*#]#) ;;
+	*) modem_result 0 code; return ;;
+	esac
+	case "$code" in
+	*[!0-9*#]*) modem_result 0 code; return ;;
+	esac
+	[ "${#code}" -le 32 ] || { modem_result 0 code; return; }
+	modem_request ussd "$code"
+}
+
 case "$1" in
 list)
-	echo '{ "sip_services": {}, "set_sip": { "enabled": true, "name": "" }, "status": {}, "version": {}, "calls": {}, "history": {}, "delete_calls": { "lines": [] }, "clear_history": {},"clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {}, "ring": { "seconds": 10 }, "click_call": { "number": "" }, "backup": {}, "restore": {} }'
+	echo '{ "quiet_set": { "minutes": 0 }, "quiet_status": {}, "quiet_seen": {}, "rec_status": {}, "rec_keep": { "name": "", "keep": true }, "rec_delete": { "name": "" }, "sip_vpn_status": {}, "set_sip_vpn": { "enabled": true, "interface": "" }, "sip_qr": {}, "mqtt_status": {}, "forward_get": { "reason": "" }, "forward_set": { "reason": "", "number": "", "seconds": "" }, "ussd": { "code": "", "reply": "" }, "ussd_end": {}, "sip_services": {}, "set_sip": { "enabled": true, "name": "" }, "status": {}, "version": {}, "calls": {}, "history": {}, "delete_calls": { "lines": [] }, "clear_history": {},"clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {}, "ring": { "seconds": 10 }, "click_call": { "number": "" }, "backup": {}, "restore": {} }'
 	;;
 call)
 	case "$2" in
@@ -334,6 +677,20 @@ call)
 	click_call) click_call ;;
 	backup) backup ;;
 	restore) restore ;;
+	quiet_set) quiet_set ;;
+	quiet_status) quiet_status ;;
+	quiet_seen) quiet_seen ;;
+	rec_status) rec_status ;;
+	rec_keep) rec_keep ;;
+	rec_delete) rec_delete ;;
+	sip_vpn_status) sip_vpn_status ;;
+	set_sip_vpn) set_sip_vpn ;;
+	sip_qr) sip_qr ;;
+	mqtt_status) mqtt_status ;;
+	forward_get) forward_get ;;
+	forward_set) forward_set ;;
+	ussd) ussd ;;
+	ussd_end) modem_request ussd-end "" ;;
 	sip_services) sip_services ;;
 	set_sip) set_sip ;;
 	clear_guard)

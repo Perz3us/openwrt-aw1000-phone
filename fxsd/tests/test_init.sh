@@ -1,7 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (C) 2026 perz3us
-# Writes to /etc, /usr/share and /var/run, so it only runs inside a throwaway container.
 
 [ -f /.dockerenv ] || { echo "run this inside a container"; exit 2; }
 
@@ -62,12 +61,16 @@ run_init() {
 			eval "$1=\${v:-\$4}"
 		}
 		config_get_bool() { config_get "$@"; }
-		config_foreach() { :; }
-		config_list_foreach() { :; }
+		config_foreach() { "$1" "test_$2"; }
+		config_list_foreach() {
+			local x
+			for x in $(uci -q get "fxs.$1.$2"); do "$3" "$x"; done
+		}
 		procd_open_instance() { :; }
 		procd_close_instance() { :; }
 		procd_set_param() {
 			[ "$1" = command ] && { shift; echo "cmd $*" >> "$log"; }
+			[ "$1" = file ] && { shift; echo "file $*" >> "$log"; }
 			return 0
 		}
 		. "$repo/openwrt/fxsd/files/fxsd.init"
@@ -138,6 +141,45 @@ check "check.sh fails on an info with no title" '[ $? -ne 0 ]'
 chmod +x "$repo"/sip/qmodem/start "$repo"/sip/qmodem/stop "$repo"/sip/qmodem/status 2>/dev/null
 sh "$repo/sip/check.sh" "$repo/sip/qmodem" > /dev/null
 check "check.sh passes on the QModem add-on" '[ $? -eq 0 ]'
+
+: > "$store"
+echo fxs.main.dnd=1 >> "$store"
+echo fxs.main.dnd_from=23:00 >> "$store"
+echo fxs.main.dnd_to=06:00 >> "$store"
+echo fxs.main.dnd_repeat=0 >> "$store"
+sh "$repo/openwrt/fxsd/files/fxs.defaults"
+check "old do not disturb becomes a window" 'grep -qx fxs.quiet_old.from=23:00 "$store" && grep -qx fxs.quiet_old.to=06:00 "$store"'
+check "repeat 0 migrates to allowed" 'grep -qx fxs.quiet_old.mode=allowed "$store"'
+check "old options are removed" '! grep -q "^fxs.main.dnd=" "$store" && ! grep -q "^fxs.main.dnd_from=" "$store"'
+: > "$store"
+echo fxs.main.dnd=0 >> "$store"
+sh "$repo/openwrt/fxsd/files/fxs.defaults"
+check "do not disturb off makes no window" '! grep -q quiet_old "$store" && ! grep -q "^fxs.main.dnd=" "$store"'
+
+: > "$store"
+echo fxs.main.enabled=1 >> "$store"
+echo fxs.main.out_mode=block >> "$store"
+echo fxs.test_outgoing.prefix=009 >> "$store"
+printf '%s\n' 'fxs.test_quiet.days=mon tue' fxs.test_quiet.from=22:00 fxs.test_quiet.to=07:00 fxs.test_quiet.mode=all 'fxs.test_quiet.name=School nights' >> "$store"
+printf '%s\n' fxs.test_holiday.from_date=2026-12-24 fxs.test_holiday.to_date=2026-12-26 fxs.test_holiday.action=once fxs.test_holiday.name=Christmas >> "$store"
+printf '%s\n' fxs.test_alarm.time=06:30 'fxs.test_alarm.days=sat sun' fxs.test_alarm.seconds=45 >> "$store"
+printf '%s\n' fxs.test_contact.number=0771234567 fxs.test_contact.ring=short fxs.test_contact.priority=important fxs.test_contact.name=Amma >> "$store"
+printf '%s\n' fxs.main.rec_mode=all fxs.main.rec_flash_mb=80 fxs.test_recnum.rule=always fxs.test_recnum.number=0772 fxs.test_recnum.enabled=1 >> "$store"
+run_init
+check "outgoing file is exact" '[ "$(cat /var/run/fxsd.outgoing)" = "block
+009" ]'
+check "quiet file is exact" '[ "$(cat /var/run/fxsd.quiet)" = "W mon,tue 22:00 07:00 all silent School nights
+H 2026-12-24 2026-12-26 00:00 00:00 allowed once Christmas" ]'
+check "alarm file is exact" '[ "$(cat /var/run/fxsd.alarms)" = "sat,sun 06:30 45" ]'
+check "contact file is exact" '[ "$(cat /var/run/fxsd.contacts)" = "$(printf "0771234567\tshort\timportant\tAmma")" ]'
+check "recording file is exact" '[ "$(cat /var/run/fxsd.rec)" = "mode=all
+format=stereo
+flash_mb=80
+usb_mb=1000
+rule=always 0772" ]'
+for f in outgoing quiet contacts alarms rec; do
+	check "a change in $f restarts fxsd" 'grep "^file " "$log" | grep -q "/var/run/fxsd.$f"'
+done
 
 [ "$fails" = 0 ] && echo ALL_OK
 [ "$fails" = 0 ]

@@ -101,6 +101,7 @@ jobs:
           [ -n "$SDK_VER" ] || unset SDK_VER
           sh scripts/build.sh /work/kernel/aw1000-fxs ${{ matrix.flavor }}
           sh scripts/build_pkgs.sh ${HASH:+"$HASH"}
+          sh scripts/check_repro.sh ${HASH:+"$HASH"}
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.flavor }}

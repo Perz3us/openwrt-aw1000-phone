@@ -67,5 +67,6 @@ struct fxs_event {
 #define FXS_PCM_BRIDGE	_IOW(FXS_IOC_MAGIC, 12, __u32)
 #define FXS_PCM_STAT	_IOR(FXS_IOC_MAGIC, 13, struct fxs_pcmstat)
 #define FXS_AUDIO_STAT	_IOR(FXS_IOC_MAGIC, 14, struct fxs_austat)
+#define FXS_REC		_IOWR(FXS_IOC_MAGIC, 15, __u32)
 
 #endif

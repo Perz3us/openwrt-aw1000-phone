@@ -4,7 +4,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-fxs
-PKG_VERSION:=0.7.0
+PKG_VERSION:=0.8.0
 PKG_RELEASE:=1
 PKG_LICENSE:=GPL-2.0-only
 PKG_MAINTAINER:=perz3us
@@ -16,7 +16,7 @@ define Package/luci-app-fxs
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
   TITLE:=LuCI page for the AW1000 RJ11 phone port
-  DEPENDS:=+fxsd +luci-base +rpcd
+  DEPENDS:=+fxsd +luci-base +rpcd +luci-lib-uqr
   PKGARCH:=all
 endef
 
@@ -24,10 +24,11 @@ define Build/Compile
 endef
 
 define Package/luci-app-fxs/install
-	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/fxs $(1)/usr/share/luci/menu.d \
+	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/fxs $(1)/www/luci-static/resources/fxs $(1)/usr/share/luci/menu.d \
 		$(1)/usr/share/rpcd/acl.d $(1)/usr/libexec/rpcd
-	$(INSTALL_DATA) ./files/phone.js ./files/history.js ./files/settings.js ./files/speeddial.js ./files/blocked.js ./files/sip.js \
+	$(INSTALL_DATA) ./files/phone.js ./files/history.js ./files/settings.js ./files/speeddial.js ./files/blocked.js ./files/outgoing.js ./files/services.js ./files/quiet.js ./files/contacts.js ./files/alarms.js ./files/mqtt.js ./files/sip.js ./files/recording.js \
 		$(1)/www/luci-static/resources/view/fxs/
+	$(INSTALL_DATA) ./files/tabs.js $(1)/www/luci-static/resources/fxs/tabs.js
 	$(INSTALL_DATA) ./files/menu.json $(1)/usr/share/luci/menu.d/luci-app-fxs.json
 	$(INSTALL_DATA) ./files/acl.json $(1)/usr/share/rpcd/acl.d/luci-app-fxs.json
 	$(INSTALL_BIN) ./files/fxs.rpcd $(1)/usr/libexec/rpcd/fxs

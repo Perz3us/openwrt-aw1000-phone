@@ -129,7 +129,7 @@ static long ms_now(void)
 	return ts.tv_sec * 1000L + ts.tv_nsec / 1000000;
 }
 
-static int at_direct(const char *tty, const char *cmd, char *resp, size_t n, int ms)
+static int at_direct_until(const char *tty, const char *cmd, char *resp, size_t n, int ms, const char *until)
 {
 	struct termios t;
 	struct pollfd pf;
@@ -155,11 +155,16 @@ static int at_direct(const char *tty, const char *cmd, char *resp, size_t n, int
 				break;
 			got += k;
 			resp[got] = 0;
-			done = strstr(resp, "OK\r\n") || strstr(resp, "ERROR");
+			done = strstr(resp, "ERROR") || (until ? strstr(resp, until) : strstr(resp, "OK\r\n"));
 		}
 	}
 	close(fd);
 	return done ? 0 : -1;
+}
+
+static int at_direct(const char *tty, const char *cmd, char *resp, size_t n, int ms)
+{
+	return at_direct_until(tty, cmd, resp, n, ms, NULL);
 }
 
 static int at_ready(const char *tty)
@@ -243,13 +248,18 @@ int modem_direct(void)
 
 int modem_at(const char *cmd, char *resp, size_t n)
 {
+	return modem_at_wait(cmd, resp, n, 3, NULL);
+}
+
+int modem_at_wait(const char *cmd, char *resp, size_t n, int secs, const char *until)
+{
 	const char *ap = port();
 	char line[320], esc[128];
 	size_t got, k = 0;
 	FILE *p;
 
 	if (*ap && modem_direct())
-		return at_direct(ap, cmd, resp, n, 3000);
+		return at_direct_until(ap, cmd, resp, n, secs * 1000, until);
 	if (!*ap || strpbrk(cmd, "'\\") || strpbrk(ap, "'\"\\"))
 		return -1;
 	for (; *cmd && k + 3 < sizeof(esc); cmd++) {
@@ -259,8 +269,8 @@ int modem_at(const char *cmd, char *resp, size_t n)
 	}
 	esc[k] = 0;
 	snprintf(line, sizeof(line),
-		 "ubus call at-daemon sendat '{\"at_port\":\"%s\",\"at_cmd\":\"%s\",\"timeout\":3}' 2>/dev/null",
-		 ap, esc);
+		 "ubus call at-daemon sendat '{\"at_port\":\"%s\",\"at_cmd\":\"%s\",\"timeout\":%d}' 2>/dev/null",
+		 ap, esc, secs);
 	p = popen(line, "r");
 	if (!p)
 		return -1;

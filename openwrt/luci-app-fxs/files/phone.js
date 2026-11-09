@@ -1,5 +1,6 @@
 'use strict';
 'require view';
+'require fxs.tabs';
 'require rpc';
 'require poll';
 'require ui';
@@ -13,7 +14,32 @@ var callVersion = rpc.declare({ object: 'fxs', method: 'version' });
 var callBackup = rpc.declare({ object: 'fxs', method: 'backup' });
 var callRestore = rpc.declare({ object: 'fxs', method: 'restore' });
 
+var callQuiet = rpc.declare({ object: 'fxs', method: 'quiet_status' });
+var callQuietSet = rpc.declare({ object: 'fxs', method: 'quiet_set', params: [ 'minutes' ] });
+var callQuietSeen = rpc.declare({ object: 'fxs', method: 'quiet_seen' });
+
 var RESTORE_FILE = '/tmp/fxs-restore.json';
+
+function minutesUntil(hhmm) {
+	var p = (hhmm || '').split(':'), now = new Date(), t = new Date(now);
+
+	if (p.length != 2)
+		return 0;
+	t.setHours(+p[0], +p[1], 0, 0);
+	if (t <= now)
+		t.setDate(t.getDate() + 1);
+	return Math.max(1, Math.round((t - now) / 60000));
+}
+
+function left(sec) {
+	var h = Math.floor(sec / 3600), m = Math.ceil((sec % 3600) / 60);
+
+	if (m == 60) {
+		h++;
+		m = 0;
+	}
+	return h ? _('%d h %d min').format(h, m) : _('%d min').format(Math.max(1, m));
+}
 
 var stateText = {
 	idle: _('Idle (on hook)'),
@@ -151,7 +177,15 @@ function statusRows(st) {
 
 	if (st.running && st.dnd)
 		rows.push([ _('Do not disturb'), st.silent ? _('On, a call is coming in without ringing') :
-			_('On, the phone does not ring. A second call from the same number within 3 minutes rings.') ]);
+			_('On, see Quiet below') ]);
+
+	if (st.running && st.recmode && st.recmode != 'off')
+		rows.push([ _('Call recording'), st.recactive ? _('Recording this call') : st.recfull ?
+			_('On, but the space is full and calls are not being recorded. See the Recording tab.') :
+			st.recusb ? _('On, saving to the USB stick') : _('On, saving to the router') ]);
+
+	if (st.running && st.service === 0)
+		rows.push([ _('Mobile service'), _('No mobile service, the phone cannot make calls. Emergency calls may still work.') ]);
 
 	if (st.running)
 		rows.push([ _('Phone on the line'), st.phone === 1 ? _('Yes') : st.phone === 0 ?
@@ -189,7 +223,7 @@ function phoneState(st) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([ callStatus(), L.resolveDefault(callVersion(), {}) ]);
+		return Promise.all([ callStatus(), L.resolveDefault(callVersion(), {}), L.resolveDefault(callQuiet(), {}) ]);
 	},
 
 	updatePhone: function(st) {
@@ -293,6 +327,74 @@ return view.extend({
 		});
 	},
 
+	quietLine: function(q) {
+		if (q.on && q.until)
+			return _('Quiet, %s left. The phone rings only for Important contacts and the Always ring list.').format(left(q.until - q.now));
+		if (q.on)
+			return _('Quiet until you end it. The phone rings only for Important contacts and the Always ring list.');
+		if (q.scheduled)
+			return _('Quiet now because of a Do not disturb window or holiday.');
+		return _('Not quiet. The phone rings as normal.');
+	},
+
+	updateQuiet: function(q) {
+		var on = !!(q && q.on);
+
+		q = q || {};
+		dom.content(this.quietText, this.quietLine(q));
+		this.quietPick.style.display = on ? 'none' : '';
+		this.quietStart.style.display = on ? 'none' : '';
+		this.quietEnd.style.display = on ? '' : 'none';
+		this.quietTime.style.display = !on && this.quietPick.value == 'until' ? '' : 'none';
+		dom.content(this.quietCalls, q.quiet_calls > 0 && !on && !q.scheduled ? E('div', { 'class': 'alert-message' }, [
+			q.quiet_calls == 1 ? _('1 call came in while it was quiet.') : _('%d calls came in while it was quiet.').format(q.quiet_calls),
+			' ',
+			E('a', { 'href': L.url('admin/services/fxs/history') }, _('See the call history')),
+			' ',
+			E('button', { 'class': 'btn', 'click': ui.createHandlerFn(this, function() {
+				return callQuietSeen().then(L.bind(function() { return callQuiet().then(L.bind(this.updateQuiet, this)); }, this));
+			}) }, _('Done'))
+		]) : '');
+	},
+
+	handleQuiet: function(minutes) {
+		if (minutes == null) {
+			minutes = this.quietPick.value == 'until' ? minutesUntil(this.quietTime.value) : +this.quietPick.value;
+		}
+		return callQuietSet(minutes).then(function(r) {
+			if (!r || !r.result)
+				ui.addNotification(null, E('p', _('The phone service did not take the change. Is it running?')));
+			return new Promise(function(res) { window.setTimeout(res, 600); });
+		}).then(function() {
+			return callQuiet();
+		}).then(L.bind(this.updateQuiet, this));
+	},
+
+	quietSection: function() {
+		this.quietText = E('p');
+		this.quietPick = E('select', { 'class': 'cbi-input-select', 'style': 'width: auto', 'change': L.bind(function() {
+			this.quietTime.style.display = this.quietPick.value == 'until' ? '' : 'none';
+		}, this) }, [
+			E('option', { 'value': '30' }, _('For 30 minutes')),
+			E('option', { 'value': '60', 'selected': '' }, _('For 1 hour')),
+			E('option', { 'value': '120' }, _('For 2 hours')),
+			E('option', { 'value': 'until' }, _('Until a time')),
+			E('option', { 'value': '-1' }, _('Until I end it'))
+		]);
+		this.quietTime = E('input', { 'type': 'time', 'value': '06:00', 'class': 'cbi-input-text', 'style': 'width: auto; display: none' });
+		this.quietStart = E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, 'handleQuiet', null) }, _('Go quiet'));
+		this.quietEnd = E('button', { 'class': 'btn cbi-button-negative', 'click': ui.createHandlerFn(this, 'handleQuiet', 0) }, _('End now'));
+		this.quietCalls = E('div');
+
+		return E('div', { 'class': 'cbi-section' }, [
+			E('h3', _('Quiet')),
+			this.quietText,
+			E('div', { 'style': 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center' },
+				[ this.quietPick, this.quietTime, this.quietStart, this.quietEnd ]),
+			this.quietCalls
+		]);
+	},
+
 	handleToggle: function() {
 		var want = !this.enabled;
 
@@ -331,6 +433,10 @@ return view.extend({
 		this.ringBtn = E('button', { 'click': ui.createHandlerFn(this, 'handleRingTest') });
 		this.updatePhone(st);
 
+		window.setTimeout(L.bind(this.updateQuiet, this, data[2] || {}), 0);
+		poll.add(L.bind(function() {
+			return L.resolveDefault(callQuiet(), {}).then(L.bind(this.updateQuiet, this));
+		}, this), 10);
 		poll.add(L.bind(function() {
 			return callStatus().then(L.bind(function(r) {
 				var cur = r || {};
@@ -356,6 +462,7 @@ return view.extend({
 					])
 				])
 			]),
+			this.quietSection(),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', _('Line test')),
 				lineTable,

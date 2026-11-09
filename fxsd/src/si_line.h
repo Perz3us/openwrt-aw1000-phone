@@ -40,6 +40,10 @@ extern const struct si_tone aw1000_dialtone;
 extern const struct si_tone aw1000_busytone;
 extern const struct si_tone aw1000_ringbacktone;
 extern const struct si_tone aw1000_waitingtone;
+extern const struct si_tone aw1000_confirmtone;
+extern const struct si_tone aw1000_stuttertone;
+extern const struct si_tone aw1000_noservicetone;
+extern const struct si_tone aw1000_congestiontone;
 
 int si_zsynth_setup(struct slic *s, uint8_t ch, const struct si_imp *m);
 int si_tone_setup(struct slic *s, uint8_t ch, const struct si_tone *t);

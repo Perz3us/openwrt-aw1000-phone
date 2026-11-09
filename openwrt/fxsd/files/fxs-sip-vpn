@@ -1,0 +1,132 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 perz3us
+
+SIP_ROOT=${SIP_ROOT:-/usr/share/fxs/sip}
+RULES=${RULES:-/usr/share/nftables.d/chain-pre/input/fxs-sip-vpn.nft}
+RELOAD=${RELOAD:-fw_reload}
+
+fw_reload() {
+	if command -v fw4 >/dev/null 2>&1; then
+		fw4 -q reload
+	else
+		/etc/init.d/firewall reload
+	fi
+}
+
+service_dir() {
+	local s
+
+	s=$(uci -q get fxs.main.sip_service || echo qmodem)
+	case "$s" in
+	''|*[!a-z0-9_-]*) return 1 ;;
+	esac
+	[ -f "$SIP_ROOT/$s/map" ] && echo "$SIP_ROOT/$s"
+}
+
+device() {
+	local d
+
+	d=$(uci -q get fxs.main.sip_vpn_if)
+	case "$d" in
+	''|*[!A-Za-z0-9_.-]*) return 1 ;;
+	esac
+	[ "${#d}" -le 15 ] && echo "$d"
+}
+
+is_up() {
+	local f
+
+	[ -r "/sys/class/net/$1/flags" ] || return 1
+	f=$(cat "/sys/class/net/$1/flags")
+	[ $((f & 1)) = 1 ]
+}
+
+needs() {
+	local dir pass
+
+	[ "$(uci -q get fxs.main.sip_enabled || uci -q get fxs.main.sip || echo 0)" = 1 ] || echo "Turn on SIP first."
+	dir=$(service_dir)
+	if [ -z "$dir" ]; then
+		echo "Choose a SIP service first."
+	else
+		[ -x "$dir/ports" ] || echo "This SIP service cannot be used over a VPN."
+		if [ -x "$dir/account" ]; then
+			pass=$("$dir/account" 2>/dev/null | sed -n 's/^password=//p')
+			[ -n "$pass" ] || echo "The SIP service needs a password."
+		fi
+	fi
+	device >/dev/null || echo "Choose the VPN connection."
+}
+
+rules() {
+	local dev dir kind val from to
+
+	dev=$(device) || return 1
+	dir=$(service_dir) || return 1
+	[ -x "$dir/ports" ] || return 1
+	"$dir/ports" 2>/dev/null | while read -r kind val; do
+		case "$kind" in
+		sip)
+			case "$val" in
+			''|*[!0-9]*) continue ;;
+			esac
+			[ "$val" -ge 1 ] && [ "$val" -le 65535 ] || continue
+			echo "iifname \"$dev\" udp dport $val accept comment \"fxs_sip_vpn\""
+			echo "iifname \"$dev\" tcp dport $val accept comment \"fxs_sip_vpn\""
+			;;
+		rtp)
+			from=${val%-*}
+			to=${val#*-}
+			case "$from$to" in
+			''|*[!0-9]*) continue ;;
+			esac
+			[ "$from" -ge 1024 ] && [ "$to" -le 65535 ] && [ "$from" -le "$to" ] || continue
+			echo "iifname \"$dev\" udp dport $from-$to accept comment \"fxs_sip_vpn\""
+			;;
+		esac
+	done
+}
+
+remove() {
+	[ -f "$RULES" ] || return 0
+	rm -f "$RULES"
+	$RELOAD
+}
+
+apply() {
+	local new
+
+	if [ "$(uci -q get fxs.main.sip_vpn)" != 1 ] || [ -n "$(needs)" ]; then
+		remove
+		return 1
+	fi
+	new=$(rules)
+	if [ -z "$new" ]; then
+		remove
+		return 1
+	fi
+	[ -f "$RULES" ] && [ "$(cat "$RULES")" = "$new" ] && return 0
+	mkdir -p "${RULES%/*}"
+	printf '%s\n' "$new" > "$RULES"
+	$RELOAD
+}
+
+status() {
+	local dev
+
+	needs | sed 's/^/need=/'
+	dev=$(device) && ! is_up "$dev" && echo "down=1"
+	[ -f "$RULES" ] && echo "active=1"
+	return 0
+}
+
+case "$1" in
+apply) apply ;;
+remove) remove ;;
+status) status ;;
+*)
+	echo "usage: fxs-sip-vpn apply|remove|status" >&2
+	exit 2
+	;;
+esac

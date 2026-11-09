@@ -1,0 +1,104 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 perz3us
+
+ERR=/var/run/fxs-mqtt.err
+STATE=/var/run/fxsd.state
+
+[ "$(uci -q get fxs.main.mqtt)" = 1 ] || exit 0
+
+fail() {
+	echo "$1" > "$ERR"
+	exit 0
+}
+
+host=$(uci -q get fxs.main.mqtt_host)
+port=$(uci -q get fxs.main.mqtt_port)
+user=$(uci -q get fxs.main.mqtt_user)
+pass=$(uci -q get fxs.main.mqtt_password)
+base=$(uci -q get fxs.main.mqtt_topic)
+base=${base:-aw1000/phone}
+
+auth() {
+	[ -n "$user" ] && set -- "$@" -u "$user"
+	[ -n "$pass" ] && set -- "$@" -P "$pass"
+	"$@"
+}
+
+pub() {
+	local out
+
+	if command -v timeout >/dev/null 2>&1; then
+		out=$(auth timeout 5 mosquitto_pub -h "$host" -p "${port:-1883}" "$@" 2>&1)
+	else
+		out=$(auth mosquitto_pub -h "$host" -p "${port:-1883}" "$@" 2>&1)
+	fi
+	if [ $? = 0 ]; then
+		rm -f "$ERR"
+	else
+		fail "${out:-the broker did not answer}"
+	fi
+}
+
+quiet_state() {
+	local on until
+
+	on=$(sed -n 's/^quiet=//p' "$STATE" 2>/dev/null)
+	until=$(sed -n 's/^quiet_until=//p' "$STATE" 2>/dev/null)
+	pub -r -t "$base/quiet" -m "$([ "$on" = 1 ] && echo on || echo off)"
+	pub -r -t "$base/quiet/until" -m "${until:-0}"
+}
+
+set_quiet() {
+	local m
+
+	case "$1" in
+	on|ON) m=-1 ;;
+	off|OFF|0) m=0 ;;
+	''|*[!0-9]*) return 0 ;;
+	*) m=$1 ;;
+	esac
+	[ "$m" -le 1440 ] || return 0
+	ubus call fxs quiet_set "{\"minutes\":$m}" >/dev/null 2>&1
+}
+
+discover() {
+	local id
+
+	id=$(printf '%s' "$base" | tr -c 'a-zA-Z0-9\n' _)
+	pub -r -t "homeassistant/switch/${id}_quiet/config" -m "{\"name\":\"Phone do not disturb\",\"unique_id\":\"${id}_quiet\",\"state_topic\":\"$base/quiet\",\"command_topic\":\"$base/quiet/set\",\"payload_on\":\"on\",\"payload_off\":\"off\",\"state_on\":\"on\",\"state_off\":\"off\",\"icon\":\"mdi:phone-off\"}"
+	pub -r -t "homeassistant/number/${id}_quiet_minutes/config" -m "{\"name\":\"Phone quiet minutes\",\"unique_id\":\"${id}_quiet_minutes\",\"command_topic\":\"$base/quiet/set\",\"min\":0,\"max\":720,\"step\":5,\"unit_of_measurement\":\"min\",\"mode\":\"box\",\"icon\":\"mdi:timer-outline\"}"
+}
+
+case "$1" in
+set)
+	set_quiet "$2"
+	exit 0
+	;;
+listen)
+	command -v mosquitto_sub >/dev/null 2>&1 || fail "mosquitto_sub is not installed"
+	[ -n "$host" ] || fail "no broker address"
+	while :; do
+		discover
+		quiet_state
+		auth mosquitto_sub -h "$host" -p "${port:-1883}" -t "$base/quiet/set" 2>/dev/null |
+		while IFS= read -r v; do
+			set_quiet "$(printf '%s' "$v" | tr -cd 'a-zA-Z0-9')"
+		done
+		sleep 10
+	done
+	;;
+esac
+
+command -v mosquitto_pub >/dev/null 2>&1 || fail "mosquitto_pub is not installed"
+[ -n "$host" ] || fail "no broker address"
+
+event=$(printf '%s' "$1" | tr -cd 'a-z_')
+number=$(printf '%s' "$2" | tr -cd '0-9+*#')
+[ "$(uci -q get fxs.main.mqtt_numbers)" = 0 ] && number=
+
+if [ "$event" = quiet ]; then
+	quiet_state
+	exit 0
+fi
+pub -t "$base/event" -m "{\"event\":\"$event\",\"number\":\"$number\"}"

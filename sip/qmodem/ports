@@ -1,0 +1,7 @@
+#!/bin/sh
+
+port=$(uci -q get qmodem_sip.inbound.listen_port)
+from=$(uci -q get qmodem_sip.main.rtp_start)
+to=$(uci -q get qmodem_sip.main.rtp_end)
+echo "sip ${port:-5060}"
+echo "rtp ${from:-40000}-${to:-40031}"

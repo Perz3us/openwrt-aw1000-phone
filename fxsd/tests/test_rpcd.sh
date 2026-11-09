@@ -1,7 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (C) 2026 perz3us
-# Writes to /etc, /usr/share and /var/run, so it only runs inside a throwaway container.
 
 [ -f /.dockerenv ] || { echo "run this inside a container"; exit 2; }
 
@@ -140,6 +139,16 @@ out=$(sh "$rpcd" call status)
 check "status reads an old backup" 'echo "$out" | grep -q "sipon=1"'
 
 reset
+out=$(sh "$rpcd" call status)
+check "status service is unknown with no value" 'echo "$out" | grep -q "service=-1"'
+printf 'state=idle\nservice=0\n' > /var/run/fxsd.state
+out=$(sh "$rpcd" call status)
+check "status shows no service" 'echo "$out" | grep -q "service=0"'
+printf 'state=idle\nservice=1\n' > /var/run/fxsd.state
+out=$(sh "$rpcd" call status)
+check "status shows service" 'echo "$out" | grep -q "service=1"'
+
+reset
 printf '#!/bin/sh\necho "Do the first thing"\necho "Do the second thing"\n' > /usr/share/fxs/sip/one/setup
 chmod +x /usr/share/fxs/sip/one/setup
 out=$(sh "$rpcd" call sip_services)
@@ -181,6 +190,108 @@ check "no qmodem-voip" 'sh "$setup" | grep -q "qmodem-voip"'
 
 out=$(sh "$rpcd" list)
 check "methods are listed" 'echo "$out" | grep -q "\"sip_services\"" && echo "$out" | grep -q "\"set_sip\""'
+
+cat > "$stubs/pidof" <<'EOF'
+#!/bin/sh
+[ -s /tmp/fake.pid ] && cat /tmp/fake.pid
+EOF
+chmod +x "$stubs/pidof"
+cat > "$stubs/fakefxsd" <<'EOF'
+#!/bin/sh
+handle() {
+	[ -f /tmp/fake.silent ] && return
+	read -r tag id kind arg < /var/run/fxsd.cmd
+	case "$kind" in
+	ussd) [ "$arg" = 1 ] && { printf 'ok=1\nmore=1\ntext=Pick\n' > "/var/run/fxsd.reply.$id"; return; }
+		[ "$arg" = 999 ] && printf 'text=x
+' > "/var/run/fxsd.reply.$id" || printf 'ok=1
+text=Balance 5
+' > "/var/run/fxsd.reply.$id" ;;
+	*) printf 'ok=0
+error=unsupported
+' > "/var/run/fxsd.reply.$id" ;;
+	esac
+}
+trap handle USR2
+while :; do sleep 0.1; done
+EOF
+chmod +x "$stubs/fakefxsd"
+
+mreq() {
+	(k=$1; a=$2; set --; . "$rpcd"; modem_request "$k" "$a")
+}
+
+rm -f /var/run/fxsd.cmd /tmp/fake.pid /tmp/fake.silent
+out=$(MODEM_WAIT=2 mreq ussd '*100#')
+check "request fails when fxsd is not running" 'echo "$out" | grep -q "ok=0;error=stopped"'
+check "no stale command file is left when fxsd is stopped" '[ ! -e /var/run/fxsd.cmd ]'
+check "no reply file is left after stopped" '! ls /var/run/fxsd.reply.* >/dev/null 2>&1'
+
+"$stubs/fakefxsd" &
+echo $! > /tmp/fake.pid
+sleep 0.3
+out=$(MODEM_WAIT=3 mreq ussd '*100#')
+check "request returns the reply" 'echo "$out" | grep -q "ok=1;text=Balance 5;"'
+check "request line has id kind and arg" 'grep -qE "^at-req [0-9]+ ussd [*]100#$" /var/run/fxsd.cmd'
+check "reply file is removed" '! ls /var/run/fxsd.reply.* >/dev/null 2>&1'
+out=$(MODEM_WAIT=3 mreq ussd 1)
+check "a menu reply says more is coming" 'echo "$out" | grep -q "more=1"'
+out=$(MODEM_WAIT=3 mreq ussd 999)
+check "a reply with no ok line is an error" 'echo "$out" | grep -q "ok=0;error=reply;"'
+out=$(MODEM_WAIT=3 mreq fwd-get '')
+check "unsupported kinds say so" 'echo "$out" | grep -q "ok=0;error=unsupported;"'
+out=$(MODEM_WAIT=3 mreq fwd-set '+94771234567,20')
+check "fwd-set is sent" 'echo "$out" | grep -q "error=unsupported" && grep -q " fwd-set +94771234567,20$" /var/run/fxsd.cmd'
+out=$(MODEM_WAIT=3 mreq ussd '*1;rm')
+check "bad arg is refused before sending" 'echo "$out" | grep -q "ok=0;error=arg;"'
+out=$(MODEM_WAIT=3 mreq dial '1')
+check "unknown kind is refused" 'echo "$out" | grep -q "ok=0;error=kind;"'
+touch /tmp/fake.silent
+out=$(MODEM_WAIT=2 mreq ussd '*100#')
+check "silent fxsd gives a timeout" 'echo "$out" | grep -q "ok=0;error=timeout;"'
+check "no reply file is left after timeout" '! ls /var/run/fxsd.reply.* >/dev/null 2>&1'
+rm -f /tmp/fake.silent
+kill "$(cat /tmp/fake.pid)" 2>/dev/null
+rm -f /tmp/fake.pid /var/run/fxsd.cmd
+
+out=$(sh "$rpcd" list)
+check "modem_request is not a listed method" '! echo "$out" | grep -q modem_request'
+
+out=$(call forward_get '{"reason":"sideways"}')
+check "bad forward reason is refused" 'echo "$out" | grep -q reason'
+out=$(call forward_set '{"reason":"busy","number":"12a45"}')
+check "forward number with letters is refused" 'echo "$out" | grep -q number'
+out=$(call forward_set '{"reason":"noanswer","number":"0771234567","seconds":"99"}')
+check "forward seconds out of range are refused" 'echo "$out" | grep -q seconds'
+out=$(call ussd '{"code":"*1;rm#"}')
+check "bad USSD code is refused" 'echo "$out" | grep -q code'
+out=$(call ussd '{"code":"123"}')
+check "USSD code must start with a star or hash" 'echo "$out" | grep -q code'
+out=$(call ussd '{"reply":"1a"}')
+check "USSD reply must be digits" 'echo "$out" | grep -q code'
+check "new methods are listed" 'sh "$rpcd" list | grep -q forward_set && sh "$rpcd" list | grep -q ussd_end'
+
+mkdir -p /root/phone-recordings
+: > /root/phone-recordings/20261109-104215-1762685535.wav
+: > /root/phone-recordings/20261109-110000-1762686800.wav
+: > /root/secret.wav
+out=$(call rec_delete '{"name":"../secret.wav"}')
+check "a path in a recording name is refused" 'echo "$out" | grep -q "result=0;error=name;" && [ -f /root/secret.wav ]'
+out=$(call rec_keep '{"name":"20261109-104215-1762685535.wav","keep":true}')
+check "keep marks the recording" 'echo "$out" | grep -q "result=1;" && [ -f /root/phone-recordings/20261109-104215-1762685535.wav.keep ]'
+out=$(call rec_status)
+check "status lists recordings with keep" 'echo "$out" | grep -q "name=20261109-104215-1762685535.wav;path=/root/phone-recordings/20261109-104215-1762685535.wav;size=0;keep=1;usb=0;"'
+printf 'last=20261109-110000-1762686800.wav\nactive=1\n' > /var/run/fxsd.rec.state
+out=$(call rec_delete '{"name":"20261109-110000-1762686800.wav"}')
+check "the recording in progress is not deleted" 'echo "$out" | grep -q "error=busy;" && [ -f /root/phone-recordings/20261109-110000-1762686800.wav ]'
+out=$(call rec_delete '{"name":"20261109-104215-1762685535.wav"}')
+check "delete removes the file and its keep mark" 'echo "$out" | grep -q "result=1;" && [ ! -e /root/phone-recordings/20261109-104215-1762685535.wav.keep ] && [ ! -e /root/phone-recordings/20261109-104215-1762685535.wav ]'
+rm -rf /root/phone-recordings /root/secret.wav /var/run/fxsd.rec.state
+
+for bad in 1441 abc -2 '1;reboot'; do
+	out=$(call quiet_set "{\"minutes\":\"$bad\"}")
+	check "quiet_set refuses $bad" 'echo "$out" | grep -q "result=0;error=minutes;"'
+done
 
 [ "$fails" = 0 ] && echo ALL_OK
 [ "$fails" = 0 ]
