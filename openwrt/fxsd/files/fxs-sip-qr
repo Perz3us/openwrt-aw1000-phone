@@ -10,8 +10,19 @@ esc() {
 	printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&apos;/g"
 }
 
+# Linphone fetches the link again when it starts, so an old code stays as an empty config
+empty() {
+	local f
+
+	for f in "$@"; do
+		[ -f "$f" ] || continue
+		printf '%s
+' '<?xml version="1.0" encoding="UTF-8"?>' '<config xmlns="http://www.linphone.org/xsds/lpconfig.xsd"></config>' > "$f"
+	done
+}
+
 clean() {
-	rm -f "$PROV"/*.xml
+	empty "$PROV"/*.xml
 }
 
 make() {
@@ -25,7 +36,7 @@ make() {
 	[ "$(uci -q get fxs.main.sip_enabled || uci -q get fxs.main.sip || echo 0)" = 1 ] ||
 		{ echo "need=Turn on SIP first."; return 1; }
 	[ -x "$dir/account" ] || { echo "need=This SIP service cannot set up phone apps with a QR code."; return 1; }
-	acc=$("$dir/account" 2>/dev/null)
+	acc=$("$dir/account" ${1:+"$1"} 2>/dev/null)
 	host=$(echo "$acc" | sed -n 's/^host=//p')
 	port=$(echo "$acc" | sed -n 's/^port=//p')
 	user=$(echo "$acc" | sed -n 's/^user=//p')
@@ -40,8 +51,9 @@ make() {
 	esac
 	[ "$transport" = tcp ] || transport=udp
 
-	clean
 	mkdir -p "$PROV"
+	find "$PROV" -name '*.xml' -mtime +30 -exec rm -f {} + 2>/dev/null
+	clean
 	[ -f "$PROV/index.html" ] || : > "$PROV/index.html"
 	name=$(tr -dc 0-9a-f < /dev/urandom 2>/dev/null | head -c 32)
 	[ "${#name}" = 32 ] || { echo "need=Could not make a random file name."; return 1; }
@@ -64,7 +76,7 @@ make() {
 </config>
 EOF
 	chmod 0644 "$f"
-	( sleep "$KEEP"; rm -f "$f" ) >/dev/null 2>&1 </dev/null &
+	( trap '' HUP; sleep "$KEEP"; empty "$f" ) >/dev/null 2>&1 </dev/null &
 	echo "url=http://$host/${PROV##*/}/$name.xml"
 	echo "expires=$KEEP"
 	echo "server=$host:$port"
@@ -75,7 +87,7 @@ EOF
 }
 
 case "$1" in
-make) make ;;
+make) make ${2:+"$2"} ;;
 clean) clean ;;
 *)
 	echo "usage: fxs-sip-qr make|clean" >&2

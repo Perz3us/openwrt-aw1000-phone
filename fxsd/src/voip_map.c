@@ -38,6 +38,8 @@ void voip_snap_set(struct voip_snap *s, const char *state, const char *origin,
 	s->answered = named(answered_by);
 	s->owner = owner_of(s->answered ? answered_by : origin);
 	s->enabled = enabled;
+	s->from_sip = owner_of(origin) == VO_OTHER;
+	snprintf(s->who, sizeof(s->who), "%s", owner_of(answered_by) == VO_OTHER ? answered_by : s->from_sip ? origin : "");
 	snprintf(s->number, sizeof(s->number), "%s", number ? number : "");
 }
 

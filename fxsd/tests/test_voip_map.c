@@ -40,6 +40,14 @@ int main(void)
 	assert(calls("idle", "", "", &c) == 0);
 	assert(calls("ending", "phone", "phone", &c) == 0);
 	assert(calls("something_new", "phone", "phone", &c) == 0);
+	voip_snap_set(&s, "active", "network", "Pixel", "", 1);
+	assert(!strcmp(s.who, "Pixel") && !s.from_sip);
+	voip_snap_set(&s, "dialing", "Laptop", "none", "", 1);
+	assert(!strcmp(s.who, "Laptop") && s.from_sip);
+	voip_snap_set(&s, "active", "phone", "phone", "", 1);
+	assert(!s.who[0] && !s.from_sip);
+	voip_snap_set(&s, "ringing", "network", "none", "", 1);
+	assert(!s.who[0] && !s.from_sip);
 	voip_snap_set(&s, "off", "", "", "", 0);
 	assert(s.st == VS_DISABLED && !s.enabled);
 	return 0;

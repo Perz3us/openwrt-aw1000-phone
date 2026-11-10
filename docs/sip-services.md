@@ -17,14 +17,14 @@ back to the modem directly as soon as the line is idle.
 
 | File | Needed | What it does |
 | --- | --- | --- |
-| `info` | yes | Shell variables `TITLE`, `PACKAGE` and `URL`. The SIP tab shows the title and links to the URL when the service is not installed |
+| `info` | yes | Shell variables `TITLE`, `PACKAGE`, `URL` and, if the service has its own LuCI page, `PAGE` (like `admin/services/modem-sip`). The SIP tab shows the title, links to the URL when the service is not installed, and links to the page when the service is chosen |
 | `map` | yes | Tells fxsd the names your service uses. It can be empty if you use ours |
 | `start` | yes | Starts the service. Called when fxsd starts with this service chosen |
 | `stop` | yes | Stops it. Called when SIP is off or another service is chosen, so it must be safe to run when nothing is running or installed |
 | `status` | yes | Prints one word: `running`, `stopped` or `not-installed` |
 | `setup` | no | Prints one line for each thing the user still has to do, and nothing when all is ready. The SIP tab shows these lines. Never print passwords |
 | `ports` | no | Prints `sip PORT` and `rtp FROM-TO`, the ports your service listens on. Without it the SIP tab can't let the service be used over a VPN |
-| `account` | no | Prints `host=`, `port=`, `user=`, `password=` and `transport=` for the account a phone app should use. Without it the SIP tab can't make a QR code for Linphone. Only fxsd's own scripts read this, it is never shown on the page |
+| `account` | no | Prints `host=`, `port=`, `user=`, `password=` and `transport=` for the account a phone app should use. It may take a phone name as its first argument, for services with a login per phone. Without it the SIP tab can't make a QR code for Linphone. Only fxsd's own scripts read this, it is never shown on the page |
 
 The folder is installed as `/usr/share/fxs/sip/<name>/`. The name can use lowercase letters,
 digits, `-` and `_`.
@@ -63,7 +63,7 @@ for `status` every few seconds, in case an event gets lost.
 An incoming call for the RJ11 phone goes `ringing` with origin `network`, then `active` with
 `answered_by` set to `phone`, then `idle`. A call from the phone goes `dialing`, `alerting`,
 `active` with origin `phone`, then `idle`. A call answered on a SIP phone goes `active` with
-`answered_by` set to your endpoint's name, which is what gives the service the audio.
+`answered_by` set to your endpoint's name, which is what gives the service the audio. Use the phone's name as the endpoint name: the call history shows it, as in Answered on Pixel, and a call started from a SIP phone shows as Called from that name.
 
 ## The map
 

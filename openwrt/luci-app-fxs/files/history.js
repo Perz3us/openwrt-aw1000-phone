@@ -29,6 +29,14 @@ var statusText = {
 	active: _('In progress')
 };
 
+function statusOf(c) {
+	if (c.via && c.status == 'elsewhere')
+		return _('Answered on %s').format(c.via);
+	if (c.via && c.sip && c.status != 'active')
+		return _('Called from %s').format(c.via);
+	return statusText[c.status] || c.status;
+}
+
 var css = '\
 .fxs-stats { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }\
 .fxs-stat { flex: 1 1 120px; padding: 12px 16px; border: 1px solid rgba(128,128,128,.35); border-radius: 6px; }\
@@ -112,6 +120,16 @@ function parse(text, live) {
 		case 'waiting':
 			target = start(t, num, 'in');
 			break;
+		case 'sipout':
+			closeAll(null);
+			target = start(t, num, 'out');
+			target.connected = t;
+			target.sip = true;
+			break;
+		case 'via':
+			if (calls.length)
+				calls[calls.length - 1].via = num;
+			return;
 		case 'reason':
 			reason = { text: num, line: line };
 			return;
@@ -373,7 +391,7 @@ return view.extend({
 					c.dir == 'in' ? '↙ ' + _('Incoming') : '↗ ' + _('Outgoing'))),
 				E('td', { 'class': 'td' }, duration(c)),
 				E('td', { 'class': 'td' }, [
-					E('span', { 'class': bad ? 'fxs-bad' : '' }, statusText[c.status] || c.status),
+					E('span', { 'class': bad ? 'fxs-bad' : '' }, statusOf(c)),
 					c.reason && reasonText(c.reason, +(uci.get('fxs', 'main', 'dnd_repeat') || 3)) ?
 						E('div', { 'style': 'opacity: .75; font-size: .9em' }, reasonText(c.reason, +(uci.get('fxs', 'main', 'dnd_repeat') || 3))) : ''
 				]),

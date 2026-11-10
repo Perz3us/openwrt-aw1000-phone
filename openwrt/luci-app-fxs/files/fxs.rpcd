@@ -304,6 +304,7 @@ sip_services() {
 		[ -f "$d/map" ] || continue
 		TITLE=
 		URL=
+		PAGE=
 		[ -f "$d/info" ] && . "$d/info"
 		json_add_object
 		json_add_string name "${d##*/}"
@@ -320,6 +321,7 @@ sip_services() {
 			rm -f /tmp/fxs-setup.$$
 		fi
 		json_close_array
+		json_add_string page "$PAGE"
 		json_close_object
 	done
 	json_close_array
@@ -547,10 +549,19 @@ set_sip_vpn() {
 	result 1
 }
 
-sip_qr() {
-	local l tmp=/tmp/fxs-qr.$$
+phone_name_ok() {
+	[ ${#1} -ge 1 ] && [ ${#1} -le 23 ] || return 1
+	case "$1" in *[!A-Za-z0-9\ _-]*) return 1 ;; esac
+}
 
-	"$SIP_QR" make > "$tmp" 2>/dev/null
+sip_qr() {
+	local input phone l tmp=/tmp/fxs-qr.$$
+
+	read -r input
+	json_load "$input" 2>/dev/null
+	json_get_var phone phone
+	[ -z "$phone" ] || phone_name_ok "$phone" || { result 0 name; return; }
+	"$SIP_QR" make ${phone:+"$phone"} > "$tmp" 2>/dev/null
 	json_init
 	json_add_array needs
 	while IFS= read -r l; do
@@ -652,7 +663,7 @@ ussd() {
 
 case "$1" in
 list)
-	echo '{ "quiet_set": { "minutes": 0 }, "quiet_status": {}, "quiet_seen": {}, "rec_status": {}, "rec_keep": { "name": "", "keep": true }, "rec_delete": { "name": "" }, "sip_vpn_status": {}, "set_sip_vpn": { "enabled": true, "interface": "" }, "sip_qr": {}, "mqtt_status": {}, "forward_get": { "reason": "" }, "forward_set": { "reason": "", "number": "", "seconds": "" }, "ussd": { "code": "", "reply": "" }, "ussd_end": {}, "sip_services": {}, "set_sip": { "enabled": true, "name": "" }, "status": {}, "version": {}, "calls": {}, "history": {}, "delete_calls": { "lines": [] }, "clear_history": {},"clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {}, "ring": { "seconds": 10 }, "click_call": { "number": "" }, "backup": {}, "restore": {} }'
+	echo '{ "quiet_set": { "minutes": 0 }, "quiet_status": {}, "quiet_seen": {}, "rec_status": {}, "rec_keep": { "name": "", "keep": true }, "rec_delete": { "name": "" }, "sip_vpn_status": {}, "set_sip_vpn": { "enabled": true, "interface": "" }, "sip_qr": { "phone": "" }, "mqtt_status": {}, "forward_get": { "reason": "" }, "forward_set": { "reason": "", "number": "", "seconds": "" }, "ussd": { "code": "", "reply": "" }, "ussd_end": {}, "sip_services": {}, "set_sip": { "enabled": true, "name": "" }, "status": {}, "version": {}, "calls": {}, "history": {}, "delete_calls": { "lines": [] }, "clear_history": {},"clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {}, "ring": { "seconds": 10 }, "click_call": { "number": "" }, "backup": {}, "restore": {} }'
 	;;
 call)
 	case "$2" in

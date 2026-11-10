@@ -94,6 +94,8 @@ check "lists status" 'echo "$out" | grep -q "name=gone;title=Not here;url=https:
 check "lists audio from the map" 'echo "$out" | grep -q "name=two;title=Second service;url=https://example.test/two;status=stopped;audio=16000"'
 check "defaults to 8000 with no audio line" 'echo "object x" > /usr/share/fxs/sip/two/map; sh "$rpcd" call sip_services | grep -q "status=stopped;audio=8000"'
 echo 'audio 16000' > /usr/share/fxs/sip/two/map
+echo PAGE=admin/services/two >> /usr/share/fxs/sip/two/info
+check "passes the page a service names" 'sh "$rpcd" call sip_services | grep -q "name=two;.*;page=admin/services/two;" && sh "$rpcd" call sip_services | grep -q "name=one;.*;page=;"'
 check "shows enabled and current" 'echo "$out" | grep -q "enabled=0;current=one"'
 
 reset
@@ -152,8 +154,8 @@ reset
 printf '#!/bin/sh\necho "Do the first thing"\necho "Do the second thing"\n' > /usr/share/fxs/sip/one/setup
 chmod +x /usr/share/fxs/sip/one/setup
 out=$(sh "$rpcd" call sip_services)
-check "lists what is missing" 'echo "$out" | grep -q "audio=8000;setup\[;=Do the first thing;=Do the second thing;\];}"'
-check "a service with no setup script lists nothing" 'echo "$out" | grep -q "name=two;.*audio=16000;setup\[;\];}"'
+check "lists what is missing" 'echo "$out" | grep -q "audio=8000;setup\[;=Do the first thing;=Do the second thing;];page=;}"'
+check "a service with no setup script lists nothing" 'echo "$out" | grep -q "name=two;.*audio=16000;setup\[;\];page=[^;]*;}"'
 
 setup=$repo/sip/qmodem/setup
 qm() {
@@ -293,5 +295,6 @@ for bad in 1441 abc -2 '1;reboot'; do
 	check "quiet_set refuses $bad" 'echo "$out" | grep -q "result=0;error=minutes;"'
 done
 
+reset
 [ "$fails" = 0 ] && echo ALL_OK
 [ "$fails" = 0 ]

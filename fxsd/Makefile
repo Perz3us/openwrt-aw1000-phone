@@ -37,6 +37,8 @@ test: tests/test_line.c src/line.c src/clcc.c src/rules.c $(wildcard src/*.h)
 	./build/test_rec
 	$(CC) $(CFLAGS) -o build/test_wav tests/test_wav.c src/wav.c src/recorder.c -lpthread
 	./build/test_wav
+	$(CC) $(CFLAGS) -Wno-unused-function -Wno-format-truncation -o build/test_modem tests/test_modem.c
+	./build/test_modem
 
 clean:
 	rm -rf build

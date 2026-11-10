@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
@@ -16,6 +17,13 @@
 #define AT_IFACE	2
 #define AT_DAEMON	"/etc/init.d/ubus-at-daemon"
 #define QMODEM_NET	"/etc/init.d/qmodem_network"
+#ifndef MMCLI
+#define MMCLI		"/usr/bin/mmcli"
+#endif
+
+#ifndef AT_LOCK_DIR
+#define AT_LOCK_DIR	"/var/lock"
+#endif
 
 static char at_port[64] = "auto";
 static char cur[64];
@@ -129,6 +137,26 @@ static long ms_now(void)
 	return ts.tv_sec * 1000L + ts.tv_nsec / 1000000;
 }
 
+/* same lock file as NoobWRT 5gmodem, so the two never talk on the port at once */
+static int at_lock(const char *tty, long until)
+{
+	char path[128];
+	const char *b = strrchr(tty, '/');
+	int fd;
+
+	snprintf(path, sizeof(path), AT_LOCK_DIR "/5gmodem-at-%s.lock", b ? b + 1 : tty);
+	if ((fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644)) < 0)
+		return -1;
+	while (flock(fd, LOCK_EX | LOCK_NB)) {
+		if (ms_now() >= until) {
+			close(fd);
+			return -1;
+		}
+		usleep(20000);
+	}
+	return fd;
+}
+
 static int at_direct_until(const char *tty, const char *cmd, char *resp, size_t n, int ms, const char *until)
 {
 	struct termios t;
@@ -136,10 +164,16 @@ static int at_direct_until(const char *tty, const char *cmd, char *resp, size_t 
 	size_t got = 0, len = strlen(cmd);
 	long end = ms_now() + ms, left;
 	ssize_t k;
-	int fd, done = 0;
+	int fd, lk, done = 0;
 
-	if (n < 2 || (fd = open(tty, O_RDWR | O_NOCTTY | O_NONBLOCK)) < 0)
+	if (n < 2)
 		return -1;
+	lk = at_lock(tty, ms_now() + ms / 2);
+	if ((fd = open(tty, O_RDWR | O_NOCTTY | O_NONBLOCK)) < 0) {
+		if (lk >= 0)
+			close(lk);
+		return -1;
+	}
 	if (!tcgetattr(fd, &t)) {
 		cfmakeraw(&t);
 		cfsetspeed(&t, B115200);
@@ -159,6 +193,8 @@ static int at_direct_until(const char *tty, const char *cmd, char *resp, size_t 
 		}
 	}
 	close(fd);
+	if (lk >= 0)
+		close(lk);
 	return done ? 0 : -1;
 }
 
@@ -241,6 +277,65 @@ int modem_data_up(void)
 	return up;
 }
 
+static int mm_no_at;
+
+static int mm_reply(const char *out, char *resp, size_t n)
+{
+	const char *a = strstr(out, "response: '"), *b;
+
+	if (a) {
+		a += 11;
+		b = strrchr(a, '\'');
+		snprintf(resp, n, "%.*s\r\nOK\r\n", (int)(b && b > a ? b - a : 0), a);
+		return 0;
+	}
+	if (strstr(out, "Unauthorized") || strstr(out, "debug mode")) {
+		mm_no_at = 1;
+		return -1;
+	}
+	if (!strstr(out, "ERROR"))
+		return -1;
+	snprintf(resp, n, "%s\r\nERROR\r\n", out);
+	return 0;
+}
+
+static int mm_owns(void)
+{
+	static long checked = -100000;
+	static int owns;
+	char buf[256] = "";
+	FILE *p;
+
+	if (mm_no_at)
+		return 0;
+	if (ms_now() - checked < 10000)
+		return owns;
+	checked = ms_now();
+	owns = 0;
+	if (access(MMCLI, X_OK) || !(p = popen(MMCLI " -L 2>/dev/null", "r")))
+		return 0;
+	owns = fread(buf, 1, sizeof(buf) - 1, p) > 0 && strstr(buf, "/Modem/");
+	pclose(p);
+	return owns;
+}
+
+static int at_mm(const char *cmd, char *resp, size_t n, int secs)
+{
+	char line[256], out[1024];
+	size_t got;
+	FILE *p;
+
+	if (strchr(cmd, '\''))
+		return -1;
+	snprintf(line, sizeof(line), MMCLI " -m any --timeout=%d --command='%s' 2>&1", secs, cmd);
+	if (!(p = popen(line, "r")))
+		return -1;
+	got = fread(out, 1, sizeof(out) - 1, p);
+	out[got] = 0;
+	pclose(p);
+	return mm_reply(out, resp, n);
+}
+
 int modem_direct(void)
 {
 	return access(AT_DAEMON, X_OK) != 0;
@@ -258,8 +353,11 @@ int modem_at_wait(const char *cmd, char *resp, size_t n, int secs, const char *u
 	size_t got, k = 0;
 	FILE *p;
 
-	if (*ap && modem_direct())
+	if (*ap && modem_direct()) {
+		if (mm_owns() && !at_mm(cmd, resp, n, secs))
+			return 0;
 		return at_direct_until(ap, cmd, resp, n, secs * 1000, until);
+	}
 	if (!*ap || strpbrk(cmd, "'\\") || strpbrk(ap, "'\"\\"))
 		return -1;
 	for (; *cmd && k + 3 < sizeof(esc); cmd++) {

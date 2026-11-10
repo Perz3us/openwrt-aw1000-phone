@@ -77,7 +77,7 @@ struct fxsd {
 	struct slic s;
 	struct line line;
 	uint8_t ch;
-	int ringing, audio, verbose, wb, bridge, sip_audio;
+	int ringing, audio, verbose, wb, bridge, sip_audio, sipout;
 	int cid_mode, cid_pending, cid_before, test_ring, cad_phase, silent, ring_once;
 	int phone, ring_n, ring_quiet;
 	long long ring_sum;
@@ -674,6 +674,13 @@ static void apply_bridge(struct fxsd *d)
 		msg(LOG_ERR, "audio bridge %s failed", want ? "start" : "stop");
 	d->bridge = want;
 	pcmsock_live(want == 2);
+	if (want == 2 && voip_snap()->from_sip) {
+		op_log(d, "sipout", voip_snap()->number);
+		d->sipout = 1;
+	} else if (want != 2 && d->sipout) {
+		op_log(d, "hangup", "");
+		d->sipout = 0;
+	}
 	if (want == 2)
 		rec_begin(d, REC_SRC_SIP, voip_snap()->number);
 }
@@ -1010,6 +1017,8 @@ static void op_log(void *c, const char *what, const char *num)
 	msg(LOG_INFO, "call %s", what);
 	if (f) {
 		fprintf(f, "%ld %s %s\n", (long)time(NULL), what, num ? num : "");
+		if ((!strcmp(what, "elsewhere") || !strcmp(what, "sipout")) && voip_snap()->who[0])
+			fprintf(f, "%ld via %s\n", (long)time(NULL), voip_snap()->who);
 		sz = ftell(f);
 		fclose(f);
 	}

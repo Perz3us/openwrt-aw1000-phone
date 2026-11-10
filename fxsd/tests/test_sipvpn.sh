@@ -136,15 +136,21 @@ printf '#!/bin/sh\nexit 1\n' > "$stubs/od"
 chmod +x "$stubs/od"
 check "a code is made on a router without od" 'sh "$qr" make | grep -q "^url=http://192.168.1.1/fxs-prov/[0-9a-f]\{32\}\.xml$"'
 rm -f "$stubs/od"
-f=$(ls "$PROV"/*.xml 2>/dev/null)
+f=$(grep -l passwd "$PROV"/*.xml 2>/dev/null)
 
 sh "$qr" make > /dev/null
-check "a new code removes the old one" '[ ! -f "$f" ] && [ "$(ls "$PROV"/*.xml | wc -l)" = 1 ]'
+check "a new code empties the old one" '[ -f "$f" ] && ! grep -q passwd "$f" && grep -q "<config" "$f" && [ "$(grep -l passwd "$PROV"/*.xml | wc -l)" = 1 ]'
 
 sh "$qr" clean
 KEEP=1 sh "$qr" make > /dev/null
 sleep 2
-check "the file is gone when the time is up" '[ -z "$(ls "$PROV"/*.xml 2>/dev/null)" ]'
+check "the password is gone when the time is up" '[ -n "$(ls "$PROV"/*.xml 2>/dev/null)" ] && ! grep -q passwd "$PROV"/*.xml'
+touch -d "40 days ago" "$PROV"/*.xml
+old=$(ls "$PROV"/*.xml)
+sh "$qr" make > /dev/null
+check "old empty files are removed" '[ ! -f "$old" ] && [ "$(ls "$PROV"/*.xml | wc -l)" = 1 ]'
+sh "$qr" clean
+check "clean empties every code" '! grep -q passwd "$PROV"/*.xml'
 
 : > /tmp/vpn.pass
 check "empty password gives the reason" 'sh "$qr" make | grep -q "^need=The SIP service needs an account name and a password"'

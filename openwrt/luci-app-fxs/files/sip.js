@@ -11,7 +11,7 @@ var callServices = rpc.declare({ object: 'fxs', method: 'sip_services' });
 var callSet = rpc.declare({ object: 'fxs', method: 'set_sip', params: [ 'enabled', 'name' ] });
 var callVpn = rpc.declare({ object: 'fxs', method: 'sip_vpn_status' });
 var callSetVpn = rpc.declare({ object: 'fxs', method: 'set_sip_vpn', params: [ 'enabled', 'interface' ] });
-var callQr = rpc.declare({ object: 'fxs', method: 'sip_qr' });
+var callQr = rpc.declare({ object: 'fxs', method: 'sip_qr', params: [ 'phone' ] });
 
 var statusText = {
 	running: _('Running'),
@@ -160,8 +160,9 @@ return view.extend({
 		ui.hideModal();
 	},
 
-	showQr: function() {
-		return callQr().then(L.bind(function(r) {
+	showQr: function(phone) {
+		phone = typeof phone == 'string' ? phone : '';
+		return callQr(phone).then(L.bind(function(r) {
 			var end, frame, clock, again, tick;
 
 			window.clearInterval(this.qrTimer);
@@ -175,7 +176,7 @@ return view.extend({
 			clock = E('div', { 'style': 'text-align: center; font-size: 1.15em; margin: 12px 0 4px' });
 			again = E('button', { 'class': 'btn cbi-button-action', 'style': 'display: none', 'click': ui.createHandlerFn(this, function() {
 				this.closeQr();
-				return this.showQr();
+				return this.showQr(phone);
 			}) }, _('New code'));
 			tick = L.bind(function() {
 				var s = Math.max(0, Math.round((end - Date.now()) / 1000));
@@ -192,7 +193,7 @@ return view.extend({
 			tick();
 			this.qrTimer = window.setInterval(tick, 1000);
 
-			ui.showModal(_('Scan with Linphone'), [
+			ui.showModal(phone ? _('Scan with Linphone on %s').format(phone) : _('Scan with Linphone'), [
 				E('p', { 'style': 'text-align: center' }, plain(_('In Linphone, open the assistant and choose to scan a QR code or fetch a remote configuration. The phone must be on this router\'s Wi-Fi.'))),
 				E('div', { 'style': 'display: flex; justify-content: center' }, frame),
 				clock,
@@ -216,6 +217,17 @@ return view.extend({
 			E('div', { 'class': 'alert-message warning' }, _('Anyone who scans this code or opens its link in the next 5 minutes gets the SIP password.')),
 			E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, 'showQr') }, _('Show QR code')),
 			this.qrBox
+		]);
+	},
+
+	pageSection: function(s) {
+		return E('div', { 'class': 'cbi-section' }, [
+			E('h3', _('Phones')),
+			E('p', {}, [
+				plain(_('Phones and the QR codes for them are set up on the %s page.').format(s.title || s.name)),
+				' ',
+				E('a', { 'href': L.url(s.page) }, _('Open %s').format(s.title || s.name))
+			])
 		]);
 	},
 
@@ -262,7 +274,8 @@ return view.extend({
 	},
 
 	render: function(data) {
-		var r = data[0], services = r.services || [];
+		var r = data[0], services = r.services || [],
+		    own = services.filter(function(s) { return s.name == r.current && s.page; })[0];
 
 		this.current = r.current;
 		this.setupBox = {};
@@ -312,7 +325,7 @@ return view.extend({
 				this.sipMsg = E('div', { 'style': 'margin-top: 8px' })
 			]),
 			this.vpnSection(data[1] || {}),
-			this.qrSection()
+			own ? this.pageSection(own) : this.qrSection()
 		]);
 	},
 

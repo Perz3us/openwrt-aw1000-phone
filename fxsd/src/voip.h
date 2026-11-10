@@ -12,7 +12,8 @@ enum voip_owner { VO_NONE, VO_RJ11, VO_OTHER };
 struct voip_snap {
 	enum voip_state st;
 	enum voip_owner owner;
-	int answered, enabled;
+	int answered, enabled, from_sip;
+	char who[24];
 	char number[CLCC_NUM_MAX];
 };
 
