@@ -2,8 +2,16 @@
 
 This is experimental. With SIP on, phones and apps on your network can make and answer calls
 through the SIM alongside the RJ11 phone. An incoming call rings all of them and whichever
-answers first gets it. The SIP side comes from a service you pick on the SIP tab. QModem voice
-is the first one, and [sip-services.md](sip-services.md) explains how to add another.
+answers first gets it. The SIP side comes from a service you pick on the SIP tab. There are two,
+Modem SIP and QModem voice, and [sip-services.md](sip-services.md) explains how to add another.
+
+## Modem SIP
+
+[Modem SIP](https://github.com/Perz3us/openwrt-modem-sip) is my own small SIP server for this.
+It needs no QModem, so it works on the new NoobWRT too. Each phone gets its own login with a QR
+code for Linphone, and HD calls use Opus or G.722. Install its packages, open Modem SIP under
+Services and press Turn on. Phones are added on that page, and the call history shows which
+one answered.
 
 ## QModem voice
 

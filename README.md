@@ -50,7 +50,8 @@ Pulse dialing and tones for other countries are not done yet (dial and busy tone
 - The SLIC patch file, see below
 
 QModem is optional. fxsd sends its AT commands through QModem, through ModemManager when it
-runs the modem, or straight to the AT port, whichever the firmware has.
+runs the modem, or straight to the AT port, whichever the firmware has. For SIP phones without
+QModem there is [Modem SIP](https://github.com/Perz3us/openwrt-modem-sip), my own SIP server.
 
 ## Install
 

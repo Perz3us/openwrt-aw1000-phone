@@ -137,7 +137,6 @@ static long ms_now(void)
 	return ts.tv_sec * 1000L + ts.tv_nsec / 1000000;
 }
 
-/* same lock file as NoobWRT 5gmodem, so the two never talk on the port at once */
 static int at_lock(const char *tty, long until)
 {
 	char path[128];

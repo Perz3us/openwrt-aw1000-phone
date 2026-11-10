@@ -10,7 +10,6 @@ esc() {
 	printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&apos;/g"
 }
 
-# Linphone fetches the link again when it starts, so an old code stays as an empty config
 empty() {
 	local f
 
