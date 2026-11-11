@@ -111,6 +111,10 @@ u32  ram_data[m]
 - ttyUSB2 is held by QModem's at-daemon, so everything goes through ubus.
 - No RING or +CLIP on any port, so fxsd polls AT+CLCC.
 - Use AT+CHUP to hang up. ATH kills data calls too.
+- The modem has two PCM interfaces and only interface 1 is wired to this bus. AT+QAUDCFG="pcmidx"
+  has to be 1. With 2 (what USB voice setups use) calls are silent both ways. AT+QDAI only
+  changes the interface in use at the time, so after switching to 1, set QDAI again and restart
+  the modem.
 - Levels: AT+CLVL=5, AT+QRXGAIN=8192, SLIC TX gain -6 dB (otherwise it clips).
 
 ## Links

@@ -36,6 +36,29 @@ ModemManager only allow that in debug mode, and then fxsd falls back to the AT p
 ModemManager takes the answers meant for fxsd. Stop ModemManager, or use a build with AT commands
 over D-Bus turned on.
 
+## Calls connect but nobody hears anything
+
+The phone rings and calls connect, but both ends are silent, and the log shows `peak modem 1`
+after every call. The modem is sending its audio somewhere other than the phone.
+
+### PCM interface 2
+
+The modem is sending its audio out of PCM interface 2, and only interface 1 is wired to the
+phone. Setups that carry call audio over USB (`AT+QPCMV`, like the old QModem RJ11 scripts)
+set `AT+QAUDCFG="pcmidx",2`, and the modem keeps it.
+
+fxsd checks it when it starts, moves the modem back to interface 1, sets slave mode again and
+restarts the modem. By hand:
+
+```
+ubus call at-daemon sendat '{"at_port":"/dev/ttyUSB2","at_cmd":"AT+QAUDCFG=\"pcmidx\",1","timeout":3}'
+ubus call at-daemon sendat '{"at_port":"/dev/ttyUSB2","at_cmd":"AT+QDAI=x,1,0,4,0,0,1,1","timeout":3}'
+ubus call at-daemon sendat '{"at_port":"/dev/ttyUSB2","at_cmd":"AT+CFUN=1,1","timeout":3}'
+```
+
+Don't skip the QDAI and the restart. Slave mode is set per interface, so after only the
+`pcmidx` change interface 1 is still master and the sound is loud and distorted.
+
 ## The phone doesn't ring, or LuCI says the modem audio is not in slave mode
 
 fxsd sets this when it starts, but the modem didn't keep it. Set it by hand and restart the

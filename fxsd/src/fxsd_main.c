@@ -1476,6 +1476,26 @@ static void check_voice(void)
 		msg(LOG_WARNING, "voice calls are turned off in the modem; run AT+QCFG=\"call_control\",0,0 and restart the modem");
 }
 
+/*
+ * The RG500Q's PCM interface 1 is the one wired to the router's PCM bus. Setups that carry call
+ * audio over USB (AT+QPCMV, as with QModem) move it to interface 2 to keep the modem off the bus,
+ * and the modem saves that. Then calls connect, but the audio goes to pins nothing is wired to.
+ * AT+QDAI applies to the interface in use when it is set, so after the switch interface 1 is
+ * still in master mode and garbles the audio until QDAI is set again and the modem restarts.
+ * Returns 1 when it switched the interface.
+ */
+static int fix_pcm_iface(void)
+{
+	char r[512];
+	int i;
+
+	if (modem_at("AT+QAUDCFG=\"pcmidx\"", r, sizeof(r)) || (i = qaudcfg_pcmidx(r)) < 0 || i == 1)
+		return 0;
+	msg(LOG_WARNING, "modem PCM was on interface %d, which is not wired to the phone; switching it to 1", i);
+	at("AT+QAUDCFG=\"pcmidx\",1");
+	return 1;
+}
+
 static void switch_rate(int hd);
 
 static int wait_modem(int hd)
@@ -1963,7 +1983,7 @@ int main(int argc, char **argv)
 		unlink(STATE_FILE);
 		return 0;
 	}
-	if ((q = modem_rate()) >= 0 && q != hd) {
+	if (fix_pcm_iface() || ((q = modem_rate()) >= 0 && q != hd)) {
 		switch_rate(hd);
 		if (wait_modem(hd)) {
 			unlink(STATE_FILE);

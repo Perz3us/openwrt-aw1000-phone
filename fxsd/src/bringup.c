@@ -103,6 +103,21 @@ int qdai_is_slave(const char *resp)
 	return mode == 1;
 }
 
+int qaudcfg_pcmidx(const char *resp)
+{
+	const char *q = strstr(resp, "+QAUDCFG:");
+	char *end;
+	long idx;
+
+	if (!q || !(q = strchr(q, ',')))
+		return -1;
+	q++;
+	idx = strtol(q, &end, 10);
+	if (end == q || idx < 1 || idx > 2)
+		return -1;
+	return idx;
+}
+
 int qdai_rate(const char *resp)
 {
 	const char *q = strstr(resp, "+QDAI:");
