@@ -652,10 +652,17 @@ static void rec_end(struct fxsd *d)
 	rec_write_state();
 }
 
+/* Modem PCM slot mapping. The SoC bridge reads the modem's audio from
+ * pcm_rx_slot and writes ours to pcm_tx_slot; qdai_slot is the slot the modem
+ * is told to use. Exposed so a board whose wiring differs can be corrected
+ * without rebuilding. */
+static int pcm_rx_slot = 1, pcm_tx_slot = 0, qdai_slot = 1;
+
 static void apply_bridge(struct fxsd *d)
 {
 	int want = d->sip_audio ? 2 : d->audio ? 1 : 0;
-	uint32_t arg = 1u | (0u << 8) | (32u << 16) | (32u << 24) | 0x80000000u | (d->wb ? 0x40000000u : 0);
+	uint32_t arg = (uint32_t)(pcm_rx_slot & 0x3f) | ((uint32_t)(pcm_tx_slot & 0x3f) << 8) |
+		(32u << 16) | (32u << 24) | 0x80000000u | (d->wb ? 0x40000000u : 0);
 
 	if (want == d->bridge)
 		return;
@@ -1531,7 +1538,7 @@ static void switch_rate(int hd)
 		return;
 	msg(LOG_INFO, "setting modem audio to %s kHz and restarting the modem", hd ? "16" : "8");
 	put_state("modem_restart", "", 0);
-	snprintf(cmd, sizeof(cmd), "AT+QDAI=x,1,0,4,0,%d,1,1", hd);
+	snprintf(cmd, sizeof(cmd), "AT+QDAI=x,1,0,4,0,%d,1,%d", hd, qdai_slot);
 	at(cmd);
 	data_since = now_ms();
 	data_redialed = 0;
@@ -1912,7 +1919,7 @@ int main(int argc, char **argv)
 	int ringback = 1, hd = 0, missed_tone = 0;
 	char r[512];
 
-	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:S:n:q:u:C:H:F:D:R:O:M:T:ofv")) != -1) {
+	while ((o = getopt(argc, argv, "p:c:g:a:l:r:e:m:b:i:t:k:w:S:n:q:u:C:H:F:D:R:O:M:T:P:Q:ofv")) != -1) {
 		switch (o) {
 		case 'p': patch = optarg; break;
 		case 'c': d.ch = atoi(optarg) & 1; break;
@@ -1933,6 +1940,8 @@ int main(int argc, char **argv)
 		case 'O': sscanf(optarg, "%15[^,],%15s", code_dnd_on, code_dnd_off); break;
 		case 'u': numfmt = optarg; break;
 		case 'M': missed_tone = atoi(optarg) == 1; break;
+		case 'P': sscanf(optarg, "%d,%d", &pcm_rx_slot, &pcm_tx_slot); break;
+		case 'Q': qdai_slot = atoi(optarg); break;
 		case 'T': mqtt_on = atoi(optarg) == 1; break;
 		case 'C': call_waiting = atoi(optarg) == 1; break;
 		case 'H': sscanf(optarg, "%23[^,],%u", hotline, &hot_s); break;
