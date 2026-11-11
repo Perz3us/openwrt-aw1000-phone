@@ -63,11 +63,11 @@ Copy the three apk files from the latest release to `/tmp` on the router and ins
 
 ```
 cd /tmp
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.8.0/kmod-aw1000-fxs-6.12.94.0.4.0-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.8.0/fxsd-0.8.0-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.8.0/luci-app-fxs-0.8.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.8.1/kmod-aw1000-fxs-0.4.0-official-openwrt-25.12.5.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.8.1/fxsd-0.8.1-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.8.1/luci-app-fxs-0.8.1-r1.apk
 /etc/init.d/fxsd stop 2>/dev/null; rmmod aw1000_fxs 2>/dev/null
-apk add --allow-untrusted /tmp/kmod-aw1000-fxs-6.12.94.0.4.0-r1.apk /tmp/fxsd-0.8.0-r1.apk /tmp/luci-app-fxs-0.8.0-r1.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-0.4.0-official-openwrt-25.12.5.apk /tmp/fxsd-0.8.1-r1.apk /tmp/luci-app-fxs-0.8.1-r1.apk
 ```
 
 Copy the patch file to `/etc/fxs/si3226x_patch.bin` and turn the port on in LuCI under
