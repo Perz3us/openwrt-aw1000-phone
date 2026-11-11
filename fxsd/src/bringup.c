@@ -118,6 +118,21 @@ int qaudcfg_pcmidx(const char *resp)
 	return idx;
 }
 
+int qpcmv_on(const char *resp)
+{
+	const char *q = strstr(resp, "+QPCMV:");
+	char *end;
+	long on;
+
+	if (!q)
+		return -1;
+	q += 7;
+	on = strtol(q, &end, 10);
+	if (end == q || on < 0 || on > 1)
+		return -1;
+	return on;
+}
+
 int qdai_rate(const char *resp)
 {
 	const char *q = strstr(resp, "+QDAI:");

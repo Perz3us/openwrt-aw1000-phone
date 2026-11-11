@@ -115,6 +115,8 @@ u32  ram_data[m]
   has to be 1. With 2 (what USB voice setups use) calls are silent both ways. AT+QDAI only
   changes the interface in use at the time, so after switching to 1, set QDAI again and restart
   the modem.
+- AT+QPCMV has to be 0. With 1 the call audio goes over USB instead of PCM. It isn't saved and
+  resets when the modem restarts.
 - Levels: AT+CLVL=5, AT+QRXGAIN=8192, SLIC TX gain -6 dB (otherwise it clips).
 
 ## Links

@@ -59,6 +59,12 @@ ubus call at-daemon sendat '{"at_port":"/dev/ttyUSB2","at_cmd":"AT+CFUN=1,1","ti
 Don't skip the QDAI and the restart. Slave mode is set per interface, so after only the
 `pcmidx` change interface 1 is still master and the sound is loud and distorted.
 
+### USB voice
+
+`AT+QPCMV?` shows `1,...`: the modem sends call audio over USB instead of PCM. fxsd turns it
+off when it starts. The modem forgets it on restart, but the old QModem `rj11` service turns it
+on again before every call. fxsd warns when `/etc/init.d/rj11` is there. Remove that package.
+
 ## The phone doesn't ring, or LuCI says the modem audio is not in slave mode
 
 fxsd sets this when it starts, but the modem didn't keep it. Set it by hand and restart the

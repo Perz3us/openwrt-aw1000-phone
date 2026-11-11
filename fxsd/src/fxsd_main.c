@@ -1496,6 +1496,24 @@ static int fix_pcm_iface(void)
 	return 1;
 }
 
+/*
+ * AT+QPCMV=1 sends call audio over USB instead of PCM (the old QModem RJ11 scripts use it), so
+ * the phone gets nothing. The modem forgets it on restart, but the old rj11 service turns it on
+ * again before every call, so warn when that service is still installed.
+ */
+static void fix_usb_voice(void)
+{
+	char r[512];
+	int on;
+
+	if (!access("/etc/init.d/rj11", F_OK))
+		msg(LOG_WARNING, "the old rj11 phone service is installed; it sends call audio over USB, remove it");
+	if (modem_at("AT+QPCMV?", r, sizeof(r)) || (on = qpcmv_on(r)) != 1)
+		return;
+	msg(LOG_WARNING, "modem call audio was going over USB (AT+QPCMV=1), turning it off");
+	at("AT+QPCMV=0");
+}
+
 static void switch_rate(int hd);
 
 static int wait_modem(int hd)
@@ -1997,6 +2015,7 @@ int main(int argc, char **argv)
 	read_own_number();
 	local_numbers(numfmt);
 	check_voice();
+	fix_usb_voice();
 	if (vol >= 0 && vol <= 5) {
 		snprintf(r, sizeof(r), "AT+CLVL=%d", vol);
 		at(r);
