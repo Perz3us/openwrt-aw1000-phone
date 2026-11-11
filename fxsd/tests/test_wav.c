@@ -131,7 +131,7 @@ int main(void)
 
 	assert(recorder_start("/tmp/fxs-wav-test/no/such", "x.wav", 8000, 1, REC_SRC_SIP, 1000000) == -1);
 
-	system("rm -rf /tmp/fxs-wav-test");
+	assert(!system("rm -rf /tmp/fxs-wav-test"));
 	puts("test_wav ok");
 	return 0;
 }

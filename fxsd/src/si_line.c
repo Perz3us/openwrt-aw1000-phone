@@ -185,7 +185,7 @@ int si_irq_read(struct slic *s, uint8_t ch, uint8_t irq[4])
 
 int si_dtmf_digit(struct slic *s, uint8_t ch, char *d)
 {
-	static const char map[16] = "D1234567890*#ABC";
+	static const char map[] = "D1234567890*#ABC";
 	uint8_t v;
 	int e;
 
