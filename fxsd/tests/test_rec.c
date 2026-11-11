@@ -107,7 +107,7 @@ int main(void)
 	assert(rec_pick_dir("/dev/sdb1 /srv/disk ext4 rw 0 0\n", out, sizeof(out)) == 0);
 	assert(!strcmp(out, REC_FLASH_DIR));
 
-	system("rm -rf /tmp/fxs-rec-test");
+	assert(!system("rm -rf /tmp/fxs-rec-test"));
 	puts("test_rec ok");
 	return 0;
 }
