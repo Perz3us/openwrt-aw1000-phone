@@ -255,6 +255,16 @@ return view.extend({
 				E('p', _('Voice calls are turned off in the modem, so every call will fail. Run this on the router and restart the modem:')),
 				E('pre', 'ubus call at-daemon sendat \'{"at_port":"/dev/ttyUSB2","at_cmd":"AT+QCFG=\\"call_control\\",0,0","timeout":3}\'')
 			]);
+		if (st.running && st.modemmute)
+			return E('div', { 'class': 'alert-message warning' }, [
+				E('p', _('The last call connected but got no sound from the modem, so neither side could hear the other. The modem is probably sending its audio to the wrong place. Check these on the modem:')),
+				E('pre', [
+					'AT+QAUDCFG="pcmidx"   should be 1',
+					'AT+QDAI?              should be x,1,...',
+					'AT+QPCMV?             should be 0'
+				].join('\n')),
+				E('p', _('Restarting the phone service fixes these by itself.'))
+			]);
 		if (st.running && st.phone === 0)
 			return E('div', { 'class': 'alert-message warning' },
 				E('p', _('No phone was found on the RJ11 port the last time it rang. Check that the phone is plugged in, then use Ring the phone to check again.')));

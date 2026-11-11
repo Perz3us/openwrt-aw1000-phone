@@ -39,7 +39,8 @@ over D-Bus turned on.
 ## Calls connect but nobody hears anything
 
 The phone rings and calls connect, but both ends are silent, and the log shows `peak modem 1`
-after every call. The modem is sending its audio somewhere other than the phone.
+after every call. The Status page shows a warning after such a call. The modem is sending its
+audio somewhere other than the phone.
 
 ### PCM interface 2
 

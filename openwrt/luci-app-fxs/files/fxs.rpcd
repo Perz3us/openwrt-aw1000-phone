@@ -28,7 +28,7 @@ sip_title() {
 }
 
 status() {
-	local state=stopped peer= offhook=0 vbat= vline= iloop= own= testring=0 voiceoff=0 since=0 hd=0 sip=0 sipcall=0 dnd=0 silent=0 phone=-1 service=-1 k v patch
+	local state=stopped peer= offhook=0 vbat= vline= iloop= own= testring=0 voiceoff=0 modemmute=0 since=0 hd=0 sip=0 sipcall=0 dnd=0 silent=0 phone=-1 service=-1 k v patch
 
 	if [ -f "$STATE" ]; then
 		while IFS='=' read -r k v; do
@@ -42,6 +42,7 @@ status() {
 			own) own="$v" ;;
 			test) testring="$v" ;;
 			voiceoff) voiceoff="$v" ;;
+			modemmute) modemmute="$v" ;;
 			since) since="$v" ;;
 			hd) hd="$v" ;;
 			sip) sip="$v" ;;
@@ -62,6 +63,7 @@ status() {
 	json_add_boolean offhook "$offhook"
 	json_add_boolean testring "$testring"
 	json_add_boolean voiceoff "$voiceoff"
+	json_add_boolean modemmute "$modemmute"
 	json_add_boolean hd "$hd"
 	json_add_int sip "$sip"
 	json_add_boolean sipcall "$sipcall"
