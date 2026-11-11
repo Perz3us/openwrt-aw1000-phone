@@ -10,5 +10,6 @@ int si_bringup(struct slic *s, const struct si_gen_cfg *c, const struct si_patch
 	       unsigned power_mask, struct si_pwr_report rep[2]);
 int qdai_is_slave(const char *resp);
 int qdai_rate(const char *resp);
+int qaudcfg_pcmidx(const char *resp);
 
 #endif

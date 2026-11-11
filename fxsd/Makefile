@@ -39,6 +39,8 @@ test: tests/test_line.c src/line.c src/clcc.c src/rules.c $(wildcard src/*.h)
 	./build/test_wav
 	$(CC) $(CFLAGS) -Wno-unused-function -Wno-format-truncation -o build/test_modem tests/test_modem.c
 	./build/test_modem
+	$(CC) $(CFLAGS) -o build/test_modem_audio tests/test_modem_audio.c src/bringup.c src/si3226x.c src/si_line.c src/aw1000_cfg.c
+	./build/test_modem_audio
 
 clean:
 	rm -rf build
