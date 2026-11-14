@@ -55,9 +55,10 @@ QModem there is [Modem SIP](https://github.com/Perz3us/openwrt-modem-sip), my ow
 
 ## Install
 
-The kernel module has to match your firmware's kernel. Each release has one for official
-OpenWrt and one for the latest NoobWRT with the start of its kernel hash in the name. Check
-yours with `apk list --installed kernel`, it is the part after `~`.
+The kernel module has to match your firmware's kernel. Each release has ones for official
+OpenWrt and NoobWRT, with the firmware in the file name and the start of the kernel hash for
+NoobWRT. When a new OpenWrt or NoobWRT kernel comes out, its module is added to the latest
+release. Check yours with `apk list --installed kernel`, it is the part after `~`.
 
 Copy the three apk files from the latest release to `/tmp` on the router and install them:
 

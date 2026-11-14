@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ref: ${{ steps.ref.outputs.ref }}
+      sdk: ${{ steps.ref.outputs.sdk }}
       flavors: ${{ steps.ref.outputs.flavors }}
       tag: ${{ steps.nw.outputs.tag }}
       openwrt: ${{ steps.nw.outputs.openwrt }}
@@ -52,6 +53,7 @@ jobs:
         run: |
           if [ "$GITHUB_EVENT_NAME" = push ]; then
             echo "ref=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "sdk=$(sed -n 's/^SDK_VER=.*:-\([0-9.]*\)}$/\1/p' scripts/build.sh)" >> "$GITHUB_OUTPUT"
             echo 'flavors=["noobwrt","official"]' >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -60,12 +62,12 @@ jobs:
           ASSETS=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.draft or .tag_name == \"$REF\") | .assets[].name")
           SDK=$(git show "$REF:scripts/build.sh" | sed -n 's/^SDK_VER=.*:-\([0-9.]*\)}$/\1/p')
           F=
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || ! echo "$ASSETS" | grep -q "noobwrt-$(echo "$HASH" | cut -c1-8)"; then
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || ! echo "$ASSETS" | grep -q "kernel-$(echo "$HASH" | cut -c1-8)\.apk"; then
             F='"noobwrt"'
           else
             echo "$REF already has a kmod for this NoobWRT kernel"
           fi
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || { [ "$OW" != "$SDK" ] && ! echo "$ASSETS" | grep -q "openwrt-$OW"; }; then
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || { [ "$OW" != "$SDK" ] && ! echo "$ASSETS" | grep -qF "official-openwrt-$OW.apk"; }; then
             F="${F:+$F,}\"official\""
           else
             echo "$REF already has a kmod for OpenWrt $OW"
@@ -116,40 +118,26 @@ jobs:
       TAG: ${{ needs.check.outputs.tag }}
       HASH: ${{ needs.check.outputs.hash }}
       OW: ${{ needs.check.outputs.ow_version }}
-      OWK: ${{ needs.check.outputs.ow_kernel }}
+      SDK: ${{ needs.check.outputs.sdk }}
     steps:
       - uses: actions/download-artifact@v8
         with:
           path: a
       - run: |
           H8=$(echo "$HASH" | cut -c1-8)
+          [ "$GITHUB_EVENT_NAME" = push ] && OW=$SDK
+          kver() { basename "$1" | sed 's/^kmod-aw1000-fxs-[0-9]*\.[0-9]*\.[0-9]*\.\(.*\)-r[0-9]*\.apk$/\1/'; }
+          mkdir out
+          for f in a/noobwrt/kmod-*.apk; do
+            [ -f "$f" ] && cp "$f" "out/kmod-aw1000-fxs-$(kver "$f")-noobwrt-$TAG-kernel-$H8.apk"
+          done
+          for f in a/official/kmod-*.apk; do
+            [ -f "$f" ] && cp "$f" "out/kmod-aw1000-fxs-$(kver "$f")-official-openwrt-$OW.apk"
+          done
+          ls -l out
           if [ "$GITHUB_EVENT_NAME" = push ]; then
-            mkdir out
-            for f in a/noobwrt/kmod-*.apk; do
-              cp "$f" "out/$(basename "$f" .apk)-noobwrt-$H8.apk"
-            done
-            cp a/official/*.apk out/
+            find a/official -name '*.apk' ! -name 'kmod-*' -exec cp {} out/ \;
             gh release create "$REF" --repo "$GITHUB_REPOSITORY" --draft --title "$REF" --notes "" out/*.apk
-            exit 0
+          else
+            gh release upload "$REF" --repo "$GITHUB_REPOSITORY" --clobber out/*.apk
           fi
-          if [ -d a/noobwrt ]; then
-            mkdir nw
-            for f in a/noobwrt/kmod-*.apk; do
-              cp "$f" "nw/$(basename "$f" .apk)-noobwrt-$H8.apk"
-            done
-            gh release create "noobwrt-$TAG" --repo "$GITHUB_REPOSITORY" --draft --target main \
-              --title "Kernel module for NoobWRT $TAG" \
-              --notes "Kernel module from $REF built for NoobWRT $TAG (kernel ~$HASH). Install it with fxsd and luci-app-fxs from $REF." \
-              nw/*.apk
-          fi
-          if [ -d a/official ]; then
-            mkdir ow
-            for f in a/official/kmod-*.apk; do
-              cp "$f" "ow/$(basename "$f" .apk)-openwrt-$OW.apk"
-            done
-            gh release create "openwrt-$OW" --repo "$GITHUB_REPOSITORY" --draft --target main \
-              --title "Kernel module for OpenWrt $OW" \
-              --notes "Kernel module from $REF built for official OpenWrt $OW (kernel $OWK). Install it with fxsd and luci-app-fxs from $REF." \
-              ow/*.apk
-          fi
-          ls -l nw ow 2>/dev/null || true
