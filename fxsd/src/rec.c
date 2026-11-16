@@ -133,6 +133,34 @@ int rec_prune(const char *dir, long limit_bytes, long need_bytes, char removed[]
 	return used + need_bytes > limit_bytes ? -1 : gone;
 }
 
+/* 1 when the deepest mount holding path is a drive or a network share, 0 when it is the
+ * router's own flash or RAM. */
+int rec_dir_external(const char *mounts, const char *path)
+{
+	static const char *const own[] = { "rootfs", "overlay", "ubifs", "jffs2", "squashfs", "tmpfs", "ramfs" };
+	const char *l = mounts;
+	size_t best = 0, ml;
+	int ext = 0, i, o;
+
+	while (l && *l) {
+		char dev[128], mnt[256], fs[32];
+
+		if (sscanf(l, "%127s %255s %31s", dev, mnt, fs) == 3) {
+			ml = strlen(mnt);
+			if (ml > best && !strncmp(path, mnt, ml) && (path[ml] == '/' || !path[ml] || ml == 1)) {
+				for (i = 0, o = 0; i < (int)(sizeof(own) / sizeof(own[0])); i++)
+					o |= !strcmp(fs, own[i]);
+				best = ml;
+				ext = !o;
+			}
+		}
+		l = strchr(l, '\n');
+		if (l)
+			l++;
+	}
+	return ext;
+}
+
 int rec_pick_dir(const char *mounts, char *out, size_t n)
 {
 	const char *l = mounts;

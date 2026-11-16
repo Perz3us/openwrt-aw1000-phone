@@ -240,6 +240,13 @@ start_service() {
 	config_get rec_flash_mb main rec_flash_mb 50
 	config_get rec_usb_mb main rec_usb_mb 1000
 	printf 'mode=%s\nformat=%s\nflash_mb=%s\nusb_mb=%s\n' "$rec_mode" "$rec_format" "$rec_flash_mb" "$rec_usb_mb" > /var/run/fxsd.rec
+	config_get rec_dir main rec_dir
+	rec_dir="${rec_dir%/}"
+	# LuCI may only play files up to /mnt/a/b/c and /root/a/b (see the ACL)
+	case "$rec_dir" in
+	*..*|*//*|*[!A-Za-z0-9._/-]*|/mnt/*/*/*/*|/root/*/*/*) ;;
+	/mnt/?*|/root/?*) [ "${#rec_dir}" -le 200 ] && echo "dir=$rec_dir" >> /var/run/fxsd.rec ;;
+	esac
 	config_foreach add_recnum recnum
 
 	mkdir -p /etc/fxs

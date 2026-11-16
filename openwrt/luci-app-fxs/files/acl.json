@@ -8,7 +8,12 @@
 			"cgi-io": [ "download" ],
 			"file": {
 				"/root/phone-recordings/*.wav": [ "read" ],
-				"/mnt/*/phone-recordings/*.wav": [ "read" ]
+				"/mnt/*/phone-recordings/*.wav": [ "read" ],
+				"/root/*/*.wav": [ "read" ],
+				"/root/*/*/*.wav": [ "read" ],
+				"/mnt/*/*.wav": [ "read" ],
+				"/mnt/*/*/*.wav": [ "read" ],
+				"/mnt/*/*/*/*.wav": [ "read" ]
 			},
 			"uci": [ "fxs" ]
 		},

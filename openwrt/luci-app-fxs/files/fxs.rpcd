@@ -406,8 +406,12 @@ usb_mount() {
 }
 
 rec_dirs() {
-	echo "$REC_FLASH"
-	awk '$1 ~ /^\/dev\/sd/ && $2 ~ /^\/mnt\// { print $2 "/phone-recordings" }' /proc/mounts 2>/dev/null
+	{
+		echo "$REC_FLASH"
+		awk '$1 ~ /^\/dev\/sd/ && $2 ~ /^\/mnt\// { print $2 "/phone-recordings" }' /proc/mounts 2>/dev/null
+		# the folder fxsd records to, which may be one chosen in the settings
+		sed -n -e 's#^dir=\(/mnt/..*\)$#\1#p' -e 's#^dir=\(/root/..*\)$#\1#p' "$REC_STATE" 2>/dev/null
+	} | awk '!seen[$0]++'
 }
 
 free_mb() {
@@ -421,13 +425,15 @@ rec_status() {
 	if [ -f "$REC_STATE" ]; then
 		while IFS== read -r k v; do
 			case "$k" in
-			dir|last) json_add_string "$k" "$v" ;;
-			usb|used|limit|full|pruned|active) json_add_int "$k" "${v:-0}" ;;
+			dir|last|want) json_add_string "$k" "$v" ;;
+			usb|used|limit|full|pruned|active|missing) json_add_int "$k" "${v:-0}" ;;
 			esac
 		done < "$REC_STATE"
 	fi
 	mkdir -p "$REC_FLASH"
 	json_add_int flash_free_mb "$(free_mb "$REC_FLASH")"
+	d=$(sed -n 's/^dir=//p' "$REC_STATE" 2>/dev/null)
+	[ -n "$d" ] && json_add_int dir_free_mb "$(free_mb "$d")"
 	m=$(usb_mount)
 	json_add_boolean usb_present "$([ -n "$m" ] && echo 1 || echo 0)"
 	[ -n "$m" ] && json_add_int usb_free_mb "$(free_mb "$m")"

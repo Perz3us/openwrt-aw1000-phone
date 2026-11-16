@@ -177,6 +177,16 @@ format=stereo
 flash_mb=80
 usb_mb=1000
 rule=always 0772" ]'
+printf '%s\n' fxs.main.rec_dir=/mnt/sda1/calls/ >> "$store"
+run_init
+check "a recording folder is passed on" 'grep -qx "dir=/mnt/sda1/calls" /var/run/fxsd.rec'
+for bad in /etc/calls /mnt/../etc '/mnt/a b' '/mnt/x;reboot' /mnt/ /mnt/a/b/c/d /root/a/b/c /mnt//x; do
+	sed -i '/^fxs.main.rec_dir=/d' "$store"
+	printf '%s\n' "fxs.main.rec_dir=$bad" >> "$store"
+	run_init
+	check "recording folder $bad is refused" '! grep -q "^dir=" /var/run/fxsd.rec'
+done
+sed -i '/^fxs.main.rec_dir=/d' "$store"
 for f in outgoing quiet contacts alarms rec; do
 	check "a change in $f restarts fxsd" 'grep "^file " "$log" | grep -q "/var/run/fxsd.$f"'
 done

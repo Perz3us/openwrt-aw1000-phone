@@ -23,7 +23,9 @@ return view.extend({
 	where: function(st) {
 		var lines = [], files = st.files || [], kept = files.filter(function(f) { return f.keep; }).length;
 
-		if (st.usb_present)
+		if (st.want && !st.missing)
+			lines.push(_('Saving to %s. %s free there.').format(st.dir, mb((st.dir_free_mb || 0) * 1048576)));
+		else if (st.usb_present)
 			lines.push(_('Saving to the USB stick. %s free on it.').format(mb((st.usb_free_mb || 0) * 1048576)));
 		else
 			lines.push(_('No USB stick found, saving to the router\'s own storage. %s free there.').format(mb((st.flash_free_mb || 0) * 1048576)));
@@ -35,6 +37,8 @@ return view.extend({
 	warnings: function(st) {
 		var w = [];
 
+		if (st.missing)
+			w.push(_('The folder %s can not be used: the drive is not plugged in, or the folder can not be written. Recordings go to the usual place below until it is back.').format(st.want));
 		if (st.full)
 			w.push(_('The last call was not recorded, or was cut short, because the space ran out. Delete recordings, unmark some kept ones, or raise the limit.'));
 		if (st.pruned)
@@ -64,6 +68,20 @@ return view.extend({
 		o.value('mono', _('Both sides mixed, about 1 MB a minute'));
 		o.default = 'stereo';
 		o.description = _('HD calls take twice the space.');
+
+		o = s.option(form.Value, 'rec_dir', _('Folder'),
+			_('Leave empty to save on the first USB stick found, or on the router when there is none. A folder on a USB stick, drive or network share (under /mnt) uses the USB space below. A folder under /root uses the router space. The folder is made if it does not exist.'));
+		o.placeholder = _('Automatic');
+		o.rmempty = true;
+		o.validate = function(section_id, value) {
+			var v = (value || '').replace(/\/$/, '');
+
+			if (!v)
+				return true;
+			if (!/^\/(mnt\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+){0,2}|root\/[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)?)$/.test(v) || /\.\./.test(v))
+				return _('Use a folder under /mnt (up to 3 levels, like /mnt/sda1/calls) or under /root (up to 2 levels). Letters, digits, dot, dash and underscore only.');
+			return true;
+		};
 
 		o = s.option(form.Value, 'rec_usb_mb', _('Space on a USB stick (MB)'),
 			_('Recordings go to a phone-recordings folder on the first USB stick found. When the space is used up, the oldest recordings that are not kept are removed.'));

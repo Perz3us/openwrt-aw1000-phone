@@ -12,6 +12,12 @@ With a USB stick plugged in they go to a `phone-recordings` folder on it, otherw
 `/root/phone-recordings` on the router. Each place has its own size limit, and when it fills up
 the oldest recordings are removed, except the ones you keep. The router always keeps 20 MB free.
 
+You can pick another folder in the Folder setting: one under `/mnt` on a USB stick, drive or
+network share, like `/mnt/sda1/calls`, or one under `/root` on the router. A folder on a drive
+uses the USB size limit, one under `/root` the router limit. If the folder can't be used, for
+example because the stick is unplugged, calls are still recorded in the usual place and the
+Recording tab tells you.
+
 Recordings survive a restart, but a firmware upgrade that doesn't keep settings deletes the
 ones on the router, and the settings backup doesn't include them.
 

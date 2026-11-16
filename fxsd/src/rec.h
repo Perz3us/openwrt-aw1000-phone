@@ -21,5 +21,6 @@ int rec_wanted(int mode, const struct rec_rule *r, int n, const char *number);
 long rec_dir_bytes(const char *dir);
 int rec_prune(const char *dir, long limit_bytes, long need_bytes, char removed[][64], int max);
 int rec_pick_dir(const char *mounts, char *out, size_t n);
+int rec_dir_external(const char *mounts, const char *path);
 
 #endif

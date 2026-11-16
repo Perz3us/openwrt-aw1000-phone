@@ -501,10 +501,10 @@ static void op_ring(void *c, int on)
 	d->ringing = on;
 }
 
-static int rec_mode = REC_OFF, rec_stereo = 1, nrec_rules, rec_open, rec_full, rec_pruned, rec_usb;
+static int rec_mode = REC_OFF, rec_stereo = 1, nrec_rules, rec_open, rec_full, rec_pruned, rec_usb, rec_missing;
 static long rec_flash_mb = 50, rec_usb_mb = 1000;
 static struct rec_rule rec_rules[REC_RULES_MAX];
-static char rec_dir[300], rec_last[64];
+static char rec_dir[300], rec_want[256], rec_last[64];
 static void op_log(void *c, const char *what, const char *num);
 
 static void rec_write_state(void)
@@ -513,9 +513,10 @@ static void rec_write_state(void)
 
 	if (!f)
 		return;
-	fprintf(f, "mode=%d\ndir=%s\nusb=%d\nused=%ld\nlimit=%ld\nfull=%d\npruned=%d\nlast=%s\nactive=%d\n",
+	fprintf(f, "mode=%d\ndir=%s\nusb=%d\nused=%ld\nlimit=%ld\nfull=%d\npruned=%d\nlast=%s\nactive=%d\nwant=%s\nmissing=%d\n",
 		rec_mode, rec_dir, rec_usb, *rec_dir ? rec_dir_bytes(rec_dir) : 0L,
-		(rec_usb ? rec_usb_mb : rec_flash_mb) << 20, rec_full, rec_pruned, rec_last, rec_open);
+		(rec_usb ? rec_usb_mb : rec_flash_mb) << 20, rec_full, rec_pruned, rec_last, rec_open,
+		rec_want, rec_missing);
 	fclose(f);
 	rename(REC_STATE ".tmp", REC_STATE);
 }
@@ -529,18 +530,34 @@ static void rec_where(void)
 	if (f)
 		fclose(f);
 	buf[n] = 0;
+	rec_missing = 0;
+	if (*rec_want) {
+		int ext = rec_dir_external(buf, rec_want);
+
+		/* under /mnt only on a mounted drive: an unplugged stick must not fill the flash */
+		if ((ext || strncmp(rec_want, "/mnt/", 5)) && (!mkdir(rec_want, 0700) || errno == EEXIST) &&
+		    !access(rec_want, W_OK | X_OK)) {
+			snprintf(rec_dir, sizeof(rec_dir), "%s", rec_want);
+			rec_usb = ext;
+			return;
+		}
+		rec_missing = 1;
+	}
 	rec_usb = rec_pick_dir(buf, rec_dir, sizeof(rec_dir));
 }
 
 static void rec_load(void)
 {
-	char line[96], v[CLCC_NUM_MAX + 16];
+	char line[320], v[CLCC_NUM_MAX + 16];
 	FILE *f = fopen(REC_FILE, "r");
 
 	nrec_rules = 0;
+	rec_want[0] = 0;
 	while (f && fgets(line, sizeof(line), f)) {
 		line[strcspn(line, "\r\n")] = 0;
-		if (sscanf(line, "mode=%15s", v) == 1)
+		if (!strncmp(line, "dir=/", 5))
+			snprintf(rec_want, sizeof(rec_want), "%s", line + 4);
+		else if (sscanf(line, "mode=%15s", v) == 1)
 			rec_mode = rec_parse_mode(v);
 		else if (sscanf(line, "format=%15s", v) == 1)
 			rec_stereo = strcmp(v, "mono") != 0;
@@ -563,7 +580,7 @@ static void rec_load(void)
 	if (rec_usb_mb < 1)
 		rec_usb_mb = 1;
 	rec_where();
-	if (recorder_fix_all(REC_FLASH_DIR) + (rec_usb ? recorder_fix_all(rec_dir) : 0))
+	if (recorder_fix_all(REC_FLASH_DIR) + (strcmp(rec_dir, REC_FLASH_DIR) ? recorder_fix_all(rec_dir) : 0))
 		msg(LOG_INFO, "fixed recordings left open by a restart");
 	rec_write_state();
 }

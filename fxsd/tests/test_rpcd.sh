@@ -290,6 +290,19 @@ out=$(call rec_delete '{"name":"20261109-104215-1762685535.wav"}')
 check "delete removes the file and its keep mark" 'echo "$out" | grep -q "result=1;" && [ ! -e /root/phone-recordings/20261109-104215-1762685535.wav.keep ] && [ ! -e /root/phone-recordings/20261109-104215-1762685535.wav ]'
 rm -rf /root/phone-recordings /root/secret.wav /var/run/fxsd.rec.state
 
+mkdir -p /root/calls
+: > /root/calls/20261116-090000-1763263800.wav
+printf 'dir=/root/calls\nwant=/root/calls\nmissing=0\nactive=0\n' > /var/run/fxsd.rec.state
+out=$(call rec_status)
+check "recordings in a chosen folder are listed" 'echo "$out" | grep -q "path=/root/calls/20261116-090000-1763263800.wav;" && echo "$out" | grep -q "want=/root/calls;" && echo "$out" | grep -q "missing=0;"'
+out=$(call rec_delete '{"name":"20261116-090000-1763263800.wav"}')
+check "a recording in a chosen folder can be deleted" 'echo "$out" | grep -q "result=1;" && [ ! -e /root/calls/20261116-090000-1763263800.wav ]'
+printf 'dir=/etc\n' > /var/run/fxsd.rec.state
+: > /etc/20261116-090000-1763263800.wav
+out=$(call rec_delete '{"name":"20261116-090000-1763263800.wav"}')
+check "a folder outside /mnt and /root is never used" 'echo "$out" | grep -q "result=0;" && [ -f /etc/20261116-090000-1763263800.wav ]'
+rm -rf /root/calls /etc/20261116-090000-1763263800.wav /var/run/fxsd.rec.state
+
 for bad in 1441 abc -2 '1;reboot'; do
 	out=$(call quiet_set "{\"minutes\":\"$bad\"}")
 	check "quiet_set refuses $bad" 'echo "$out" | grep -q "result=0;error=minutes;"'

@@ -107,6 +107,21 @@ int main(void)
 	assert(rec_pick_dir("/dev/sdb1 /srv/disk ext4 rw 0 0\n", out, sizeof(out)) == 0);
 	assert(!strcmp(out, REC_FLASH_DIR));
 
+	{
+		const char *m = "/dev/root /rom squashfs ro 0 0\noverlayfs:/overlay / overlay rw 0 0\n"
+				"/dev/sda1 /mnt/sda1 ext4 rw 0 0\n//nas/calls /mnt/nas cifs rw 0 0\n"
+				"tmpfs /tmp tmpfs rw 0 0\n/dev/sda10 /mnt/sda10 vfat rw 0 0\n";
+
+		assert(rec_dir_external(m, "/mnt/sda1/calls") == 1);
+		assert(rec_dir_external(m, "/mnt/sda1") == 1);
+		assert(rec_dir_external(m, "/mnt/nas/rec") == 1);
+		assert(rec_dir_external(m, "/root/calls") == 0);
+		assert(rec_dir_external(m, "/mnt/usb/calls") == 0);
+		assert(rec_dir_external(m, "/mnt/sda1x/calls") == 0);
+		assert(rec_dir_external(m, "/mnt/sda10/calls") == 1);
+		assert(rec_dir_external(m, "/tmp/calls") == 0);
+	}
+
 	assert(!system("rm -rf /tmp/fxs-rec-test"));
 	puts("test_rec ok");
 	return 0;
