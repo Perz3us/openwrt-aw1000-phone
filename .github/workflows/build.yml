@@ -121,8 +121,15 @@ jobs:
       SDK: ${{ needs.check.outputs.sdk }}
     steps:
       - uses: actions/download-artifact@v8
+        if: contains(needs.check.outputs.flavors, 'noobwrt')
         with:
-          path: a
+          name: noobwrt
+          path: a/noobwrt
+      - uses: actions/download-artifact@v8
+        if: contains(needs.check.outputs.flavors, 'official')
+        with:
+          name: official
+          path: a/official
       - run: |
           H8=$(echo "$HASH" | cut -c1-8)
           [ "$GITHUB_EVENT_NAME" = push ] && OW=$SDK
