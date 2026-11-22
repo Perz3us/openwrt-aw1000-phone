@@ -248,8 +248,8 @@ return view.extend({
 		return E('tr', { 'class': 'tr' }, [
 			E('td', { 'class': 'td', 'width': '5%' }, radio),
 			E('td', { 'class': 'td left' }, [ plain(s.title || s.name), this.setupBox[s.name] ]),
-			E('td', { 'class': 'td left' }, plain(statusText[s.status] || s.status)),
-			E('td', { 'class': 'td left' }, s.audio == 16000 ? _('HD (16 kHz)') : _('8 kHz')),
+			E('td', { 'class': 'td left', 'data-title': _('Status') }, plain(statusText[s.status] || s.status)),
+			E('td', { 'class': 'td left', 'data-title': _('Audio') }, s.audio == 16000 ? _('HD (16 kHz)') : _('8 kHz')),
 			E('td', { 'class': 'td left' }, off && s.url ? E('a', { 'href': s.url, 'target': '_blank', 'rel': 'noreferrer' }, _('Get it')) : '')
 		]);
 	},
@@ -282,7 +282,7 @@ return view.extend({
 		this.toggle = E('input', { 'type': 'checkbox', 'id': 'sip_enabled' });
 		this.toggle.checked = !!r.enabled;
 		this.line = E('p', {}, plain(lineText(r)));
-		this.list = E('table', { 'class': 'table' }, [
+		this.list = E('table', { 'class': 'table fxs-table' }, [
 			E('tr', { 'class': 'tr table-titles' }, [
 				E('th', { 'class': 'th' }),
 				E('th', { 'class': 'th left' }, _('Service')),

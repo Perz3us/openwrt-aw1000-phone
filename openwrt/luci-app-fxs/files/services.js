@@ -74,9 +74,9 @@ return view.extend({
 			this.seconds[t[0]] = E('input', { 'class': 'cbi-input-text', 'type': 'number', 'min': 5, 'max': 30, 'step': 5, 'value': 20, 'style': 'width: 5em' });
 
 		return E('tr', { 'class': 'tr' }, [
-			E('td', { 'class': 'td left' }, t[1]),
-			E('td', { 'class': 'td left' }, this.state[t[0]]),
-			E('td', { 'class': 'td left' }, [ this.number[t[0]] ].concat(this.seconds[t[0]] ? [ ' ', this.seconds[t[0]], ' ', _('seconds') ] : [])),
+			E('td', { 'class': 'td left' }, E('strong', t[1])),
+			E('td', { 'class': 'td left', 'data-title': _('Now') }, this.state[t[0]]),
+			E('td', { 'class': 'td left', 'data-title': _('Number') }, [ this.number[t[0]] ].concat(this.seconds[t[0]] ? [ ' ', this.seconds[t[0]], ' ', _('seconds') ] : [])),
 			E('td', { 'class': 'td left' }, [
 				E('button', { 'class': 'btn cbi-button-save', 'click': ui.createHandlerFn(this, 'setForward', t[0], false) }, _('Set')),
 				' ',
@@ -123,24 +123,28 @@ return view.extend({
 
 		return E([], [
 			E('h2', _('Phone services')),
+			E('div', { 'class': 'cbi-section' }, [
 			E('h3', _('Call forwarding')),
-			E('div', { 'class': 'cbi-map-descr' }, _('The network keeps this setting on your SIM, so it also applies to calls for SIP phones. Your network may charge for forwarded calls. This needs support from your modem, SIM and mobile network, so it does not work on every connection.')),
-			E('table', { 'class': 'table' }, [
+			E('p', { 'class': 'cbi-section-descr' }, _('The network keeps this setting on your SIM, so it also applies to calls for SIP phones. Your network may charge for forwarded calls. This needs support from your modem, SIM and mobile network, so it does not work on every connection.')),
+			E('table', { 'class': 'table fxs-table' }, [
 				E('tr', { 'class': 'tr table-titles' }, [
 					E('th', { 'class': 'th left' }, _('Forward')),
 					E('th', { 'class': 'th left' }, _('Now')),
 					E('th', { 'class': 'th left' }, _('Number')),
 					E('th', { 'class': 'th left' })
 				])
-			].concat(reasons.map(L.bind(this.forwardRow, this)))),
+			].concat(reasons.map(L.bind(this.forwardRow, this))))
+			]),
+			E('div', { 'class': 'cbi-section' }, [
 			E('h3', _('USSD')),
-			E('div', { 'class': 'cbi-map-descr' }, _('Send a code like a balance check and read the answer here. The codes depend on your network, and this does not work on every modem and SIM.')),
-			E('p', {}, [
+			E('p', { 'class': 'cbi-section-descr' }, _('Send a code like a balance check and read the answer here. The codes depend on your network, and this does not work on every modem and SIM.')),
+			E('p', { 'class': 'fxs-wrap' }, [
 				this.ussdCode, ' ',
 				E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, 'sendUssd', false) }, _('Send'))
 			]),
 			this.ussdOut,
 			this.ussdMore
+			])
 		]);
 	},
 

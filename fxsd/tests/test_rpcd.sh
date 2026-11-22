@@ -308,6 +308,36 @@ for bad in 1441 abc -2 '1;reboot'; do
 	check "quiet_set refuses $bad" 'echo "$out" | grep -q "result=0;error=minutes;"'
 done
 
+mkdir -p /etc/fxs
+printf '100 incoming 0771
+100 missed 0771
+150 incoming 0772
+160 answered 0772
+200 missed 0773
+' > /etc/fxs/calls.log
+rm -f /etc/fxs/.history_seen
+echo 9.9.9 > /tmp/fxs-latest
+out=$(call badges)
+check "badges count missed calls" 'echo "$out" | grep -q "missed=2;"'
+check "badges pass the cached release" 'echo "$out" | grep -q "latest=9.9.9;"'
+call history_seen >/dev/null
+check "opening the history clears the count" 'call badges | grep -q "missed=0;" && [ "$(cat /etc/fxs/.history_seen)" = 200 ]'
+echo '300 missed 0774' >> /etc/fxs/calls.log
+check "a new missed call counts again" 'call badges | grep -q "missed=1;"'
+rm -f /etc/fxs/calls.log /etc/fxs/.history_seen /tmp/fxs-latest
+
+printf 'fxs.b1=block
+fxs.b1.number=0771234567
+' > "$store"
+out=$(call add_number '{"kind":"block","name":"","number":"12;reboot"}')
+check "add_number refuses a bad number" 'echo "$out" | grep -q "result=0;error=number;"'
+out=$(call add_number '{"kind":"main","name":"x","number":"123"}')
+check "add_number refuses other sections" 'echo "$out" | grep -q "result=0;error=kind;"'
+out=$(call add_number '{"kind":"contact","name":"","number":"123"}')
+check "a contact needs a name" 'echo "$out" | grep -q "result=0;error=name;"'
+out=$(call add_number '{"kind":"block","name":"","number":"0771234567"}')
+check "a number is not added twice" 'echo "$out" | grep -q "result=0;error=exists;"'
+
 reset
 [ "$fails" = 0 ] && echo ALL_OK
 [ "$fails" = 0 ]

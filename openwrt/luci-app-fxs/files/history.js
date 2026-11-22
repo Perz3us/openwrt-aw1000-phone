@@ -15,6 +15,20 @@ var callClick = rpc.declare({ object: 'fxs', method: 'click_call', params: [ 'nu
 var callRec = rpc.declare({ object: 'fxs', method: 'rec_status' });
 var callRecKeep = rpc.declare({ object: 'fxs', method: 'rec_keep', params: [ 'name', 'keep' ] });
 var callRecDelete = rpc.declare({ object: 'fxs', method: 'rec_delete', params: [ 'name' ] });
+var callSeen = rpc.declare({ object: 'fxs', method: 'history_seen' });
+var callAdd = rpc.declare({ object: 'fxs', method: 'add_number', params: [ 'kind', 'name', 'number' ] });
+
+function dayLabel(t) {
+	var d = new Date(t * 1000), today = new Date();
+
+	today.setHours(0, 0, 0, 0);
+	d.setHours(0, 0, 0, 0);
+	if (d.getTime() == today.getTime())
+		return _('Today');
+	if (today - d == 86400000)
+		return _('Yesterday');
+	return d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: d.getFullYear() == today.getFullYear() ? undefined : 'numeric' });
+}
 
 var PAGE = 50;
 
@@ -49,7 +63,33 @@ var css = '\
 .fxs-out { color: #3a7bd5; }\
 .fxs-bad { color: #c0392b; }\
 .fxs-rec { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }\
-.fxs-rec audio { max-width: 100%; height: 32px; }';
+.fxs-rec audio { max-width: 100%; height: 32px; }\
+.fxs-day .td { font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; opacity: .65; padding-top: 14px !important; text-align: left !important; }\
+@media (max-width: 600px) {\
+.fxs-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }\
+.fxs-stat { padding: 8px 10px; }\
+.fxs-stat .n { font-size: 1.4em; }\
+.fxs-stat .l { font-size: .85em; }\
+.fxs-bar > .btn { flex: 1 1 20%; }\
+.fxs-bar > span { flex: 0 0 44px; }\
+.fxs-bar > input[type="date"] { flex: 1 1 calc(100% - 60px); min-width: 0; }\
+.fxs-bar > input[type="search"] { flex: 1 1 100%; width: 100%; }\
+.fxs-bar > select { flex: 1 1 100%; width: 100%; }\
+.fxs-calls .td:nth-child(2) { order: -1; flex-basis: 100% !important; font-size: 1.1em; font-weight: 600; padding-bottom: 0 !important; }\
+.fxs-calls .td:nth-child(1) { flex-basis: 100% !important; opacity: .7; padding-top: 0 !important; }\
+.fxs-calls .td:nth-child(3), .fxs-calls .td:nth-child(5) { flex: 0 1 auto !important; }\
+.fxs-calls .td:nth-child(4) { flex: 1 1 auto !important; }\
+.fxs-calls .td:nth-child(-n+3)::before, .fxs-calls .td:nth-child(5)::before { display: none !important; }\
+.fxs-calls .td:nth-child(4)::before { display: inline !important; padding: 0 4px 0 0 !important; }\
+.fxs-calls .td.fxs-nodur { display: none !important; }\
+.fxs-calls .td:nth-child(6) { flex: 1 1 100% !important; display: flex !important; flex-wrap: wrap; gap: 6px; padding-top: 4px !important; }\
+.fxs-calls .td:nth-child(6) > .btn { flex: 1 1 auto; margin: 0 !important; }\
+.fxs-calls .td:nth-child(6) > .fxs-rec { flex-basis: 100%; }\
+.fxs-rec { justify-content: flex-start; }\
+}\
+@media (max-width: 370px) {\
+.fxs-calls .td:nth-child(6) > .btn { flex-basis: 40%; }\
+}';
 
 function digits(n) {
 	return (n || '').replace(/[^0-9]/g, '').slice(-9);
@@ -372,7 +412,7 @@ return view.extend({
 		}));
 
 		var head = E('tr', { 'class': 'tr table-titles' }, [
-			E('th', { 'class': 'th' }, _('Date and time')),
+			E('th', { 'class': 'th' }, _('Time')),
 			E('th', { 'class': 'th' }, _('Number')),
 			E('th', { 'class': 'th' }, _('Type')),
 			E('th', { 'class': 'th' }, _('Duration')),
@@ -380,23 +420,39 @@ return view.extend({
 			E('th', { 'class': 'th' })
 		]);
 
-		var body = rows.slice(this.page * PAGE, (this.page + 1) * PAGE).map(function(c) {
-			var name = names[digits(c.number)],
-			    bad = c.status == 'missed' || c.status == 'blocked' || c.status == 'failed';
+		var lastDay = null, blocked = {};
 
-			return E('tr', { 'class': 'tr' }, [
-				E('td', { 'class': 'td' }, new Date(c.start * 1000).toLocaleString()),
-				E('td', { 'class': 'td' }, name ? [ E('strong', name), E('br'), c.number ] : (c.number || _('Private number'))),
-				E('td', { 'class': 'td' }, E('span', { 'class': c.dir == 'in' ? 'fxs-in' : 'fxs-out' },
+		uci.sections('fxs', 'block').forEach(function(s) {
+			if (s.number)
+				blocked[digits(s.number)] = true;
+		});
+
+		var body = [];
+
+		rows.slice(this.page * PAGE, (this.page + 1) * PAGE).forEach(function(c) {
+			var name = names[digits(c.number)],
+			    bad = c.status == 'missed' || c.status == 'blocked' || c.status == 'failed',
+			    day = dayLabel(c.start),
+			    dialable = /^\+?[0-9*#]{1,23}$/.test(c.number);
+
+			if (day != lastDay) {
+				body.push(E('tr', { 'class': 'tr fxs-day' }, E('td', { 'class': 'td', 'colspan': 6 }, day)));
+				lastDay = day;
+			}
+
+			body.push(E('tr', { 'class': 'tr' }, [
+				E('td', { 'class': 'td', 'data-title': _('Time') }, new Date(c.start * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })),
+				E('td', { 'class': 'td', 'data-title': _('Number') }, name ? [ E('strong', name), E('br'), c.number ] : (c.number || _('Private number'))),
+				E('td', { 'class': 'td', 'data-title': _('Type') }, E('span', { 'class': c.dir == 'in' ? 'fxs-in' : 'fxs-out' },
 					c.dir == 'in' ? '↙ ' + _('Incoming') : '↗ ' + _('Outgoing'))),
-				E('td', { 'class': 'td' }, duration(c)),
-				E('td', { 'class': 'td' }, [
+				E('td', { 'class': duration(c) == '-' ? 'td fxs-nodur' : 'td', 'data-title': _('Duration') }, duration(c)),
+				E('td', { 'class': 'td', 'data-title': _('Status') }, [
 					E('span', { 'class': bad ? 'fxs-bad' : '' }, statusOf(c)),
 					c.reason && reasonText(c.reason, +(uci.get('fxs', 'main', 'dnd_repeat') || 3)) ?
 						E('div', { 'style': 'opacity: .75; font-size: .9em' }, reasonText(c.reason, +(uci.get('fxs', 'main', 'dnd_repeat') || 3))) : ''
 				]),
 				E('td', { 'class': 'td right' }, c.status == 'active' ? '' : [
-					/^\+?[0-9*#]{1,23}$/.test(c.number) ? E('button', {
+					dialable ? E('button', {
 						'class': 'btn cbi-button-action',
 						'title': _('Ring the phone and call this number when you lift the handset'),
 						'click': L.bind(this.clickCall, this, c)
@@ -407,9 +463,21 @@ return view.extend({
 						'title': _('Delete this call'),
 						'click': L.bind(this.deleteCall, this, c)
 					}, _('Delete')),
+					dialable && !name ? ' ' : '',
+					dialable && !name ? E('button', {
+						'class': 'btn cbi-button-positive',
+						'title': _('Add this number to the phonebook'),
+						'click': L.bind(this.addContact, this, c)
+					}, _('Add contact')) : '',
+					dialable && !blocked[digits(c.number)] && c.dir == 'in' ? ' ' : '',
+					dialable && !blocked[digits(c.number)] && c.dir == 'in' ? E('button', {
+						'class': 'btn cbi-button-negative',
+						'title': _('Reject calls from this number'),
+						'click': L.bind(this.blockNumber, this, c, name)
+					}, _('Block')) : '',
 					this.recCell(c)
 				])
-			]);
+			]));
 		}, this);
 
 		if (!body.length)
@@ -462,6 +530,56 @@ return view.extend({
 		});
 	},
 
+	saved: function(r, done) {
+		var err = { exists: _('This number is already there.'), name: _('Enter a name of up to 47 letters.'), number: _('This is not a phone number.') };
+
+		if (!r || !r.result) {
+			ui.addNotification(null, E('p', err[r && r.error] || _('Could not save the number.')));
+			return;
+		}
+		ui.hideModal();
+		ui.addNotification(null, E('p', done), 'info');
+		uci.unload('fxs');
+		return uci.load('fxs').then(L.bind(function() {
+			this.nameMap = this.names();
+			this.refresh();
+		}, this));
+	},
+
+	addContact: function(c) {
+		var input = E('input', { 'class': 'cbi-input-text', 'type': 'text', 'placeholder': _('Name'), 'style': 'width: 100%' });
+
+		ui.showModal(_('Add contact'), [
+			E('p', _('Name for %s').format(c.number)),
+			input,
+			E('div', { 'class': 'right', 'style': 'margin-top: 12px' }, [
+				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
+				' ',
+				E('button', { 'class': 'btn cbi-button-positive', 'click': ui.createHandlerFn(this, function() {
+					return callAdd('contact', input.value.trim(), c.number).then(L.bind(function(r) {
+						return this.saved(r, _('%s added to the phonebook.').format(input.value.trim()));
+					}, this));
+				}) }, _('Save'))
+			])
+		]);
+		input.focus();
+	},
+
+	blockNumber: function(c, name) {
+		ui.showModal(_('Block number'), [
+			E('p', _('Reject all calls from %s? You can remove it on the Blocked numbers page.').format(name || c.number)),
+			E('div', { 'class': 'right' }, [
+				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
+				' ',
+				E('button', { 'class': 'btn cbi-button-negative', 'click': ui.createHandlerFn(this, function() {
+					return callAdd('block', name || '', c.number).then(L.bind(function(r) {
+						return this.saved(r, _('%s is blocked.').format(name || c.number));
+					}, this));
+				}) }, _('Block'))
+			])
+		]);
+	},
+
 	deleteCall: function(c) {
 		var name = this.nameMap[digits(c.number)];
 
@@ -508,6 +626,7 @@ return view.extend({
 		this.nameMap = this.names();
 		this.recMap = this.recFiles(data[3] || {});
 		this.page = 0;
+		L.resolveDefault(callSeen(), null);
 
 		this.from = E('input', { 'type': 'date', 'class': 'cbi-input-text', 'change': update });
 		this.to = E('input', { 'type': 'date', 'class': 'cbi-input-text', 'change': update });
@@ -520,7 +639,7 @@ return view.extend({
 			E('option', { 'value': 'blocked' }, _('Blocked'))
 		]);
 		this.stats = E('div', { 'class': 'fxs-stats' });
-		this.table = E('table', { 'class': 'table' });
+		this.table = E('table', { 'class': 'table fxs-table fxs-calls' });
 		this.pageInfo = E('span');
 		this.prev = E('button', { 'class': 'btn', 'click': L.bind(function() { this.page--; this.refresh(); }, this) }, '‹ ' + _('Newer'));
 		this.next = E('button', { 'class': 'btn', 'click': L.bind(function() { this.page++; this.refresh(); }, this) }, _('Older') + ' ›');

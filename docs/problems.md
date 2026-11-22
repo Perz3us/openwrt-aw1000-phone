@@ -88,4 +88,5 @@ fxsd starts again.
 
 ## New tabs don't show after an update
 
-The browser has the old pages cached. Press Ctrl+F5, or log out of LuCI and back in.
+The browser has the old pages cached. Press Ctrl+F5, or log out of LuCI and back in. On a
+phone, clear the site data for the router's address in the browser settings.

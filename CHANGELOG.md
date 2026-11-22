@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.0 (2026-11-22)
+
+- The LuCI pages are redone for phones, with a page menu instead of the tab row
+- Update from the Status page, which also says when a new version is out
+- Call history is grouped by day, and a number can be blocked or added to the phonebook from there
+- Call a number from the Status page, the phone rings and dials it when you lift the handset
+- The menu shows how many calls were missed since you last opened the call history
+- Status shows the mobile network and signal on NoobWRT, and when the line was last tested
+- The kernel module is still 0.4.0
+
 ## 0.9.0 (2026-11-16)
 
 - Choose the folder for call recordings, on a USB stick, drive or network share under /mnt, or on the router under /root (#18)

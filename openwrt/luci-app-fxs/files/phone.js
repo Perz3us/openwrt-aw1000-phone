@@ -1,6 +1,6 @@
 'use strict';
 'require view';
-'require fxs.tabs';
+'require fxs.tabs as tabs';
 'require rpc';
 'require poll';
 'require ui';
@@ -13,10 +13,13 @@ var callRingTest = rpc.declare({ object: 'fxs', method: 'ring_test' });
 var callVersion = rpc.declare({ object: 'fxs', method: 'version' });
 var callBackup = rpc.declare({ object: 'fxs', method: 'backup' });
 var callRestore = rpc.declare({ object: 'fxs', method: 'restore' });
+var callUpdateCheck = rpc.declare({ object: 'fxs', method: 'update_check' });
+var callUpdateInstall = rpc.declare({ object: 'fxs', method: 'update_install' });
 
 var callQuiet = rpc.declare({ object: 'fxs', method: 'quiet_status' });
 var callQuietSet = rpc.declare({ object: 'fxs', method: 'quiet_set', params: [ 'minutes' ] });
 var callQuietSeen = rpc.declare({ object: 'fxs', method: 'quiet_seen' });
+var callClick = rpc.declare({ object: 'fxs', method: 'click_call', params: [ 'number' ] });
 
 var RESTORE_FILE = '/tmp/fxs-restore.json';
 
@@ -75,7 +78,7 @@ var css = '\
 .fxs-phone.talking .dot { animation: fxs-pulse 1.2s infinite; }\
 .fxs-phone .dot { fill: #2e8b3e; opacity: 0; }\
 .fxs-phone.stopped svg { opacity: .3; filter: grayscale(1); }\
-.fxs-phone .fxs-state { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; padding: 5px 16px; border-radius: 999px; background: rgba(255,255,255,.07); font-size: .95em; font-weight: 600; letter-spacing: .2px; }\
+.fxs-phone .fxs-state { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; padding: 5px 16px; border-radius: 999px; background: rgba(128,128,128,.14); font-size: .95em; font-weight: 600; letter-spacing: .2px; }\
 .fxs-phone .fxs-state::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: #8b919b; }\
 .fxs-phone.idle .fxs-state::before { background: #3fb950; }\
 .fxs-phone.dialtone .fxs-state::before, .fxs-phone.digits .fxs-state::before, .fxs-phone.calling .fxs-state::before { background: #e0a800; }\
@@ -92,7 +95,26 @@ var css = '\
 @keyframes fxs-shake { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-4deg); } 75% { transform: rotate(4deg); } }\
 @keyframes fxs-wave { 0% { opacity: 0; } 40% { opacity: 1; } 100% { opacity: 0; } }\
 @keyframes fxs-pulse { 0%,100% { opacity: 0; } 50% { opacity: 1; } }\
+.fxs-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; vertical-align: -1px; }\
+.fxs-bars i { width: 4px; border-radius: 1px; background: rgba(128,128,128,.4); }\
+.fxs-bars i:nth-child(1) { height: 4px; } .fxs-bars i:nth-child(2) { height: 7px; } .fxs-bars i:nth-child(3) { height: 10px; } .fxs-bars i:nth-child(4) { height: 12px; }\
+.fxs-bars i.on { background: #3fb950; }\
 .fxs-footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid rgba(128,128,128,.25); text-align: center; font-size: 90%; opacity: .75; line-height: 1.7; }\
+@media (max-width: 600px) {\
+.fxs-top { display: block; }\
+.fxs-phone { width: auto; display: grid; grid-template-columns: 84px 1fr; grid-template-rows: 1fr auto auto auto 1fr; column-gap: 16px; align-items: center; justify-items: start; text-align: left; margin-bottom: 16px; }\
+.fxs-phone svg { width: 84px; height: 72px; grid-row: 1 / 6; }\
+.fxs-phone .fxs-state { grid-row: 2; }\
+.fxs-phone .fxs-peer { grid-row: 3; }\
+.fxs-phone .fxs-timer { grid-row: 4; }\
+.fxs-phone .fxs-state { margin-top: 0; font-size: 15px; }\
+.fxs-phone .fxs-peer, .fxs-phone .fxs-timer { min-height: 0; margin-top: 4px; padding-left: 4px; }\
+.fxs-phone .fxs-peer:empty, .fxs-phone .fxs-timer:empty { display: none; }\
+#view .fxs-switch { width: 100% !important; }\
+.fxs-row > select { flex: 1 1 140px; }\
+.fxs-row > .btn { flex: 1 1 100px; }\
+.fxs-row > input { flex: 1 1 160px; }\
+}\
 ';
 
 var phoneSvg = '\
@@ -129,6 +151,17 @@ function milliamps(ua) {
 	return '%.1f mA'.format(Math.abs(ua) / 1000);
 }
 
+function signalText(pct) {
+	var bars = pct >= 75 ? 4 : pct >= 50 ? 3 : pct >= 25 ? 2 : pct > 0 ? 1 : 0;
+
+	return E('span', { 'title': pct + '%' }, [
+		E('span', { 'class': 'fxs-bars' }, [ 1, 2, 3, 4 ].map(function(n) {
+			return E('i', { 'class': n <= bars ? 'on' : '' });
+		})),
+		' ', [ _('No signal'), _('Weak'), _('Fair'), _('Good'), _('Excellent') ][bars]
+	]);
+}
+
 function lineRows(st) {
 	var v = Math.abs(st.vline || 0) / 1000, i = Math.abs(st.iloop || 0) / 1000, b = Math.abs(st.vbat || 0) / 1000;
 	var ringing = st.state === 'ringing', rows = [], line, cur, bat;
@@ -150,6 +183,9 @@ function lineRows(st) {
 		bat = b >= 50 && b <= 70 ? _('OK') : _('Out of range');
 	}
 
+	if (st.lasttest)
+		rows.push([ _('Last ring test'), new Date(st.lasttest * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+			st.phone === 1 ? _('phone found') : st.phone === 0 ? _('no phone found') : '' ]);
 	rows.push([ _('Line voltage'), volts(st.vline), line ]);
 	rows.push([ _('Loop current'), milliamps(st.iloop), cur ]);
 	rows.push([ _('Battery voltage'), volts(st.vbat), bat ]);
@@ -166,7 +202,7 @@ function lineRows(st) {
 function statusRows(st) {
 	var rows = [
 		[ _('Line'), stateText[st.state] || st.state ],
-		[ _('My number'), st.own || _('unknown, set it in Settings') ],
+		[ _('My number'), st.own || E('a', { 'href': L.url('admin/services/fxs/settings') }, _('unknown, set it in Settings')) ],
 		[ _('Handset'), st.offhook ? _('off hook') : _('on hook') ],
 		[ _('Audio'), !st.running ? '-' : (st.hd ? _('HD (16 kHz)') : _('Normal (8 kHz)')) ]
 	];
@@ -191,12 +227,18 @@ function statusRows(st) {
 		rows.push([ _('Phone on the line'), st.phone === 1 ? _('Yes') : st.phone === 0 ?
 			_('Not found, check that a phone is plugged in') : _('Not checked yet. Press Ring the phone to check.') ]);
 
-	rows = rows.concat([
-		[ _('Number'), [ 'ringing', 'calling', 'talking' ].indexOf(st.state) >= 0 && st.peer ? st.peer : '-' ],
-		[ _('Service running'), yesno(st.running) ],
-		[ _('Kernel module loaded'), yesno(st.module) ],
-		[ _('SLIC patch present'), yesno(st.patch) ]
-	]);
+	if (st.operator || st.signal)
+		rows.push([ _('Mobile network'), [ st.operator, st.netmode ].filter(function(x) { return x && x != '-'; }).join(', ') || '-' ]);
+	if (st.signal && st.signal != '-')
+		rows.push([ _('Signal'), signalText(+st.signal) ]);
+
+	rows.push([ _('Number'), [ 'ringing', 'calling', 'talking' ].indexOf(st.state) >= 0 && st.peer ? st.peer : '-' ]);
+	if (!st.running || !st.module || !st.patch)
+		rows = rows.concat([
+			[ _('Service running'), yesno(st.running) ],
+			[ _('Kernel module loaded'), yesno(st.module) ],
+			[ _('SLIC patch present'), yesno(st.patch) ]
+		]);
 
 	return rows.map(function(r) {
 		return E('tr', { 'class': 'tr' }, [
@@ -399,9 +441,35 @@ return view.extend({
 		return E('div', { 'class': 'cbi-section' }, [
 			E('h3', _('Quiet')),
 			this.quietText,
-			E('div', { 'style': 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center' },
+			E('div', { 'class': 'fxs-row', 'style': 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center' },
 				[ this.quietPick, this.quietTime, this.quietStart, this.quietEnd ]),
 			this.quietCalls
+		]);
+	},
+
+	dialSection: function() {
+		var num = E('input', { 'type': 'tel', 'class': 'cbi-input-text', 'placeholder': _('Number to call') });
+
+		return E('div', { 'class': 'cbi-section' }, [
+			E('h3', _('Call a number')),
+			E('p', { 'class': 'cbi-section-descr' }, _('The phone rings. Lift the handset within 30 seconds and the number is dialed.')),
+			E('div', { 'class': 'fxs-row', 'style': 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center' }, [
+				num,
+				E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, function() {
+					var n = num.value.replace(/[\s-]/g, '');
+
+					if (!/^\+?[0-9*#]{1,23}$/.test(n)) {
+						ui.addNotification(null, E('p', _('Enter a phone number.')));
+						return;
+					}
+					return callClick(n).then(function(r) {
+						if (r && r.result)
+							ui.addNotification(null, E('p', _('The phone is ringing. Lift the handset within 30 seconds to call %s.').format(n)), 'info');
+						else
+							ui.addNotification(null, E('p', r && r.error == 'busy' ? _('The phone is in use.') : _('The phone service is not running.')));
+					});
+				}) }, _('Call'))
+			])
 		]);
 	},
 
@@ -421,13 +489,63 @@ return view.extend({
 		}, this));
 	},
 
+	showUpdate: function(r) {
+		var box = this.updateBox, btn;
+
+		if (r.busy || this.updating) {
+			dom.content(box, E('pre', { 'style': 'white-space: pre-wrap' }, r.log || _('Starting...')));
+			if (r.busy || !r.log) {
+				window.setTimeout(L.bind(this.handleUpdateCheck, this), 2000);
+				return;
+			}
+			if (/Done\s*$/.test(r.log))
+				dom.append(box, E('p', _('Updated. Reload the page to use the new version.')));
+			this.updating = false;
+			return;
+		}
+		if (!r.latest) {
+			dom.content(box, E('p', _('Could not reach GitHub. Check the router has internet and try again.')));
+			return;
+		}
+		if (!tabs.newer(r.latest, r.installed)) {
+			dom.content(box, E('p', _('You have the latest version (%s).').format(r.installed)));
+			return;
+		}
+		if (!r.apk) {
+			dom.content(box, E('p', _('Version %s is out. This router uses opkg and the releases only have apk packages, so download them from the releases page.').format(r.latest)));
+			return;
+		}
+		btn = E('button', { 'class': 'btn cbi-button-apply', 'click': ui.createHandlerFn(this, 'handleUpdateInstall') },
+			_('Update to %s').format(r.latest));
+		dom.content(box, [
+			E('p', _('Version %s is out, you have %s. The phone line restarts during the update, so do it when no call is on.').format(r.latest, r.installed)),
+			r.notes ? E('pre', { 'style': 'white-space: pre-wrap; max-height: 200px; overflow: auto' }, r.notes) : '',
+			btn
+		]);
+	},
+
+	handleUpdateCheck: function() {
+		return L.resolveDefault(callUpdateCheck(), {}).then(L.bind(this.showUpdate, this));
+	},
+
+	handleUpdateInstall: function() {
+		return callUpdateInstall().then(L.bind(function(r) {
+			if (!r || !r.result) {
+				ui.addNotification(null, E('p', _('Could not start the update.')));
+				return;
+			}
+			this.updating = true;
+			return this.handleUpdateCheck();
+		}, this));
+	},
+
 	render: function(data) {
 		var st = data[0] || {};
 		var ver = data[1] || {};
 		var verText = ver.fxsd ? _('Version %s, driver %s').format(ver.fxsd, ver.driver || '?') : '';
 
-		var statusTable = E('table', { 'class': 'table' }, statusRows(st));
-		var lineTable = E('table', { 'class': 'table' }, lineRows(st));
+		var statusTable = E('table', { 'class': 'table fxs-kv' }, statusRows(st));
+		var lineTable = E('table', { 'class': 'table fxs-kv' }, lineRows(st));
 		var guard = E('div', {}, this.renderGuard(st));
 
 		this.phone = E('div', { 'class': 'fxs-phone' });
@@ -444,6 +562,10 @@ return view.extend({
 		this.updatePhone(st);
 
 		window.setTimeout(L.bind(this.updateQuiet, this, data[2] || {}), 0);
+		L.resolveDefault(tabs.badges(), {}).then(L.bind(function(b) {
+			if (b.latest && tabs.newer(b.latest, b.installed))
+				this.handleUpdateCheck();
+		}, this));
 		poll.add(L.bind(function() {
 			return L.resolveDefault(callQuiet(), {}).then(L.bind(this.updateQuiet, this));
 		}, this), 10);
@@ -466,25 +588,35 @@ return view.extend({
 			E('div', { 'class': 'cbi-section' }, [
 				E('div', { 'class': 'fxs-top' }, [
 					this.phone,
-					E('div', { 'style': 'flex: 1; min-width: 280px' }, [
+					E('div', { 'style': 'flex: 1; min-width: min(280px, 100%)' }, [
 						E('div', { 'style': 'margin-bottom: 12px' }, [ this.toggle, this.toggleNote ]),
 						statusTable
 					])
 				])
 			]),
+			this.dialSection(),
 			this.quietSection(),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', _('Line test')),
 				lineTable,
-				E('div', { 'style': 'margin-top: 10px' }, this.ringBtn)
+				E('div', { 'class': 'fxs-actions', 'style': 'margin-top: 10px' }, this.ringBtn)
 			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', _('Backup')),
 				E('div', { 'class': 'cbi-value-description', 'style': 'margin-bottom: 10px' },
 					_('Save or load the phone settings, speed dial, blocked numbers and call history.')),
-				E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, 'handleBackup') }, _('Save backup')),
-				' ',
-				E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, 'handleRestore') }, _('Restore backup'))
+				E('div', { 'class': 'fxs-actions' }, [
+					E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, 'handleBackup') }, _('Save backup')),
+					E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, 'handleRestore') }, _('Restore backup'))
+				])
+			]),
+			E('div', { 'class': 'cbi-section' }, [
+				E('h3', _('Update')),
+				E('div', { 'class': 'cbi-value-description', 'style': 'margin-bottom: 10px' },
+					_('Check GitHub for a new version of fxsd and this page. A new driver still has to be installed by hand.')),
+				this.updateBox = E('div', { 'style': 'margin-bottom: 10px' }),
+				E('div', { 'class': 'fxs-actions' },
+					E('button', { 'class': 'btn cbi-button-action', 'click': ui.createHandlerFn(this, 'handleUpdateCheck') }, _('Check for update')))
 			]),
 			E('div', { 'class': 'fxs-footer' }, [
 				E('div', {}, [

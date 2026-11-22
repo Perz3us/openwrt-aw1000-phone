@@ -14,6 +14,12 @@ SIP_QR=/usr/libexec/fxs-sip-qr
 UPLOAD=/tmp/fxs-restore.json
 RESTORE_DIR=/tmp/fxs-restore
 SIP_ROOT=/usr/share/fxs/sip
+RELEASE=https://api.github.com/repos/Perz3us/openwrt-aw1000-phone/releases/latest
+UPD_DIR=/tmp/fxs-update
+UPD_LOG=/tmp/fxs-update.log
+LATEST=/tmp/fxs-latest
+SEEN=/etc/fxs/.history_seen
+RINGTEST=/tmp/fxs-ringtest
 
 sip_is_on() {
 	uci -q get fxs.main.sip_enabled || uci -q get fxs.main.sip || echo 0
@@ -83,11 +89,24 @@ status() {
 	json_add_boolean clock_ok "$([ "$(date +%Y)" -ge 2025 ] && echo 1 || echo 0)"
 	json_add_boolean sipon "$(sip_is_on)"
 	json_add_string siptitle "$(sip_title "$(sip_current)")"
+	[ -s "$RINGTEST" ] && json_add_int lasttest "$(cat "$RINGTEST")"
+	modem_signal
 	json_add_string recmode "$(uci -q get fxs.main.rec_mode || echo off)"
 	json_add_boolean recactive "$(grep -qx active=1 /var/run/fxsd.rec.state 2>/dev/null && echo 1 || echo 0)"
 	json_add_boolean recfull "$(grep -qx full=1 /var/run/fxsd.rec.state 2>/dev/null && echo 1 || echo 0)"
 	json_add_boolean recusb "$(grep -qx usb=1 /var/run/fxsd.rec.state 2>/dev/null && echo 1 || echo 0)"
 	json_dump
+}
+
+# shortcut: signal comes from the 5G modem app's cache on NoobWRT; other firmware shows no signal row
+modem_signal() {
+	local m
+
+	m=$(ls /tmp/5gmodem/metrics_*.json 2>/dev/null | head -1)
+	[ -n "$m" ] || return
+	json_add_string operator "$(jsonfilter -q -i "$m" -e '@.operator_name')"
+	json_add_string signal "$(jsonfilter -q -i "$m" -e '@.signal')"
+	json_add_string netmode "$(jsonfilter -q -i "$m" -e '@.mode')"
 }
 
 pkg_version() {
@@ -104,6 +123,97 @@ version() {
 	json_add_string luci "$(pkg_version luci-app-fxs)"
 	json_add_string driver "$(pkg_version kmod-aw1000-fxs | sed 's/.*\.\([0-9]*\.[0-9]*\.[0-9]*-r[0-9]*\)$/\1/')"
 	json_dump
+}
+
+fetch() {
+	wget -q -T 20 -U luci-app-fxs -O "$2" "$1"
+}
+
+update_check() {
+	local rel
+
+	[ -d "$UPD_DIR" ] || rel=$(fetch "$RELEASE" - 2>/dev/null)
+	echo "$rel" | jsonfilter -q -e '@.tag_name' | sed 's/^v//' > "$LATEST.tmp" && [ -s "$LATEST.tmp" ] && mv "$LATEST.tmp" "$LATEST"
+	rm -f "$LATEST.tmp"
+	json_init
+	json_add_string installed "$(pkg_version fxsd)"
+	json_add_string latest "$(echo "$rel" | jsonfilter -q -e '@.tag_name' | sed 's/^v//')"
+	json_add_string notes "$(echo "$rel" | jsonfilter -q -e '@.body')"
+	json_add_boolean apk "$(command -v apk >/dev/null && echo 1 || echo 0)"
+	json_add_boolean busy "$([ -d "$UPD_DIR" ] && echo 1 || echo 0)"
+	json_add_string log "$(tail -n 15 "$UPD_LOG" 2>/dev/null)"
+	json_dump
+}
+
+update_run() {
+	local u
+
+	echo "Looking for the latest release"
+	for u in $(fetch "$RELEASE" - | jsonfilter -e '@.assets[*].browser_download_url' | grep -E '/(fxsd|luci-app-fxs)-[0-9][^/]*\.apk$'); do
+		echo "Downloading ${u##*/}"
+		fetch "$u" "$UPD_DIR/${u##*/}" || return 1
+	done
+	ls "$UPD_DIR"/*.apk >/dev/null 2>&1 || { echo "No packages found in the release"; return 1; }
+	# NoobWRT's aw1000-voice-web ships a copy of our rpcd script
+	apk add --allow-untrusted --force-overwrite "$UPD_DIR"/*.apk
+}
+
+badges() {
+	local seen
+
+	if [ ! -s "$LATEST" ] || [ -n "$(find "$LATEST" -mmin +1440 2>/dev/null)" ]; then
+		touch "$LATEST"
+		( fetch "$RELEASE" - 2>/dev/null | jsonfilter -q -e '@.tag_name' | sed 's/^v//' > "$LATEST.tmp" && [ -s "$LATEST.tmp" ] && mv "$LATEST.tmp" "$LATEST"; rm -f "$LATEST.tmp" ) </dev/null >/dev/null 2>&1 &
+	fi
+	seen=$(cat "$SEEN" 2>/dev/null)
+	json_init
+	json_add_int missed "$(awk -v s="${seen:-0}" '$1 > s && $2 == "missed"' "$CALLS" 2>/dev/null | wc -l)"
+	json_add_string latest "$(cat "$LATEST" 2>/dev/null)"
+	json_add_string installed "$(pkg_version fxsd)"
+	json_dump
+}
+
+add_number() {
+	local input kind name number sid
+
+	read -r input
+	json_load "$input"
+	json_get_var kind kind
+	json_get_var name name
+	json_get_var number number
+	case "$kind" in block|contact) ;; *) result 0 kind; return ;; esac
+	case "$number" in ''|*[!0-9+*#]*) result 0 number; return ;; esac
+	[ "${#number}" -le 23 ] || { result 0 number; return; }
+	case "$name" in *"	"*|*"
+"*) result 0 name; return ;; esac
+	[ "$(printf %s "$name" | wc -c)" -le 47 ] || { result 0 name; return; }
+	[ "$kind" = contact ] && [ -z "$name" ] && { result 0 name; return; }
+	for sid in $(uci -q show fxs | grep "=$kind$" | cut -d= -f1 | cut -d. -f2); do
+		[ "$(uci -q get "fxs.$sid.number")" = "$number" ] && { result 0 exists; return; }
+	done
+	sid=$(uci add fxs "$kind") || { result 0 uci; return; }
+	uci set "fxs.$sid.number=$number"
+	[ -n "$name" ] && uci set "fxs.$sid.name=$name"
+	uci commit fxs
+	reload_config
+	result 1
+}
+
+history_seen() {
+	local last
+
+	last=$(awk '$2 == "missed" { t = $1 } END { print t + 0 }' "$CALLS" 2>/dev/null)
+	[ "${last:-0}" -gt "$(cat "$SEEN" 2>/dev/null || echo 0)" ] && echo "$last" > "$SEEN"
+	echo '{ "result": true }'
+}
+
+update_install() {
+	command -v apk >/dev/null && mkdir "$UPD_DIR" 2>/dev/null && {
+		( update_run && echo "Done" || echo "Update failed"; rm -rf "$UPD_DIR" ) >"$UPD_LOG" 2>&1 </dev/null &
+		echo '{ "result": true }'
+		return
+	}
+	echo '{ "result": false }'
 }
 
 set_enabled() {
@@ -671,12 +781,17 @@ ussd() {
 
 case "$1" in
 list)
-	echo '{ "quiet_set": { "minutes": 0 }, "quiet_status": {}, "quiet_seen": {}, "rec_status": {}, "rec_keep": { "name": "", "keep": true }, "rec_delete": { "name": "" }, "sip_vpn_status": {}, "set_sip_vpn": { "enabled": true, "interface": "" }, "sip_qr": { "phone": "" }, "mqtt_status": {}, "forward_get": { "reason": "" }, "forward_set": { "reason": "", "number": "", "seconds": "" }, "ussd": { "code": "", "reply": "" }, "ussd_end": {}, "sip_services": {}, "set_sip": { "enabled": true, "name": "" }, "status": {}, "version": {}, "calls": {}, "history": {}, "delete_calls": { "lines": [] }, "clear_history": {},"clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {}, "ring": { "seconds": 10 }, "click_call": { "number": "" }, "backup": {}, "restore": {} }'
+	echo '{ "add_number": { "kind": "", "name": "", "number": "" }, "badges": {}, "history_seen": {}, "update_check": {}, "update_install": {}, "quiet_set": { "minutes": 0 }, "quiet_status": {}, "quiet_seen": {}, "rec_status": {}, "rec_keep": { "name": "", "keep": true }, "rec_delete": { "name": "" }, "sip_vpn_status": {}, "set_sip_vpn": { "enabled": true, "interface": "" }, "sip_qr": { "phone": "" }, "mqtt_status": {}, "forward_get": { "reason": "" }, "forward_set": { "reason": "", "number": "", "seconds": "" }, "ussd": { "code": "", "reply": "" }, "ussd_end": {}, "sip_services": {}, "set_sip": { "enabled": true, "name": "" }, "status": {}, "version": {}, "calls": {}, "history": {}, "delete_calls": { "lines": [] }, "clear_history": {},"clear_guard": {}, "set_enabled": { "enabled": true }, "ring_test": {}, "ring": { "seconds": 10 }, "click_call": { "number": "" }, "backup": {}, "restore": {} }'
 	;;
 call)
 	case "$2" in
 	status) status ;;
 	version) version ;;
+	update_check) update_check ;;
+	badges) badges ;;
+	add_number) add_number ;;
+	history_seen) history_seen ;;
+	update_install) update_install ;;
 	calls) calls ;;
 	history) history ;;
 	delete_calls) delete_calls ;;
@@ -687,6 +802,7 @@ call)
 	set_enabled) set_enabled ;;
 	ring_test)
 		if kill -USR1 $(pidof fxsd) 2>/dev/null; then
+			date +%s > "$RINGTEST"
 			echo '{ "result": true }'
 		else
 			echo '{ "result": false }'

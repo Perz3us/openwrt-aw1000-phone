@@ -38,6 +38,7 @@ Pick up, hear a dial tone, dial. Incoming calls ring the phone with caller ID. O
 - Alarm calls, a line test, and an LED that shows the line state
 - [Scripts and MQTT](docs/scripts.md) for Home Assistant, doorbells and alerts
 - Backup and restore of everything
+- LuCI pages that work on a phone screen, and updates from the Status page
 
 Pulse dialing and tones for other countries are not done yet (dial and busy tone are 425 Hz).
 
@@ -64,11 +65,11 @@ Copy the three apk files from the latest release to `/tmp` on the router and ins
 
 ```
 cd /tmp
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.9.0/kmod-aw1000-fxs-0.4.0-official-openwrt-25.12.5.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.9.0/fxsd-0.9.0-r1.apk
-wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.9.0/luci-app-fxs-0.9.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.10.0/kmod-aw1000-fxs-0.4.0-official-openwrt-25.12.5.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.10.0/fxsd-0.10.0-r1.apk
+wget https://github.com/Perz3us/openwrt-aw1000-phone/releases/download/v0.10.0/luci-app-fxs-0.10.0-r1.apk
 /etc/init.d/fxsd stop 2>/dev/null; rmmod aw1000_fxs 2>/dev/null
-apk add --allow-untrusted /tmp/kmod-aw1000-fxs-0.4.0-official-openwrt-25.12.5.apk /tmp/fxsd-0.9.0-r1.apk /tmp/luci-app-fxs-0.9.0-r1.apk
+apk add --allow-untrusted /tmp/kmod-aw1000-fxs-0.4.0-official-openwrt-25.12.5.apk /tmp/fxsd-0.10.0-r1.apk /tmp/luci-app-fxs-0.10.0-r1.apk
 ```
 
 Copy the patch file to `/etc/fxs/si3226x_patch.bin` and turn the port on in LuCI under
