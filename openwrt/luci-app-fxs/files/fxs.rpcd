@@ -83,7 +83,7 @@ status() {
 	[ -n "$iloop" ] && json_add_int iloop "$iloop"
 	json_add_boolean running "$(pidof fxsd >/dev/null && echo 1 || echo 0)"
 	json_add_boolean module "$(grep -q '^aw1000_fxs ' /proc/modules && echo 1 || echo 0)"
-	json_add_boolean guard "$([ -f "$GUARD" ] && echo 1 || echo 0)"
+	json_add_boolean guard "$([ -f "$GUARD" ] && [ "$(cat "$GUARD")" != "$(cat /proc/sys/kernel/random/boot_id)" ] && echo 1 || echo 0)"
 	json_add_boolean patch "$([ -s "${patch:-/etc/fxs/si3226x_patch.bin}" ] && echo 1 || echo 0)"
 	json_add_boolean enabled "$(uci -q get fxs.main.enabled || echo 1)"
 	json_add_boolean clock_ok "$([ "$(date +%Y)" -ge 2025 ] && echo 1 || echo 0)"
